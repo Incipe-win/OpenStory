@@ -47,10 +47,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           args: ./...
+          install-mode: goinstall
 
   docker-build:
     runs-on: ubuntu-latest

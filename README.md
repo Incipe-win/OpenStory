@@ -319,6 +319,119 @@ make migrate       # 数据库迁移
 make build         # 构建二进制
 ```
 
+## 生产部署
+
+### 架构
+
+```
+                    ┌─────────────────────┐
+                    │   CloudFlare CDN    │
+                    │   (incipe.top)      │
+                    └─────────┬───────────┘
+                              │ HTTPS :2053
+                              ▼
+              ┌───────────────────────────────┐
+              │  Nginx (80/443/2053)          │
+              │  ├─ /            → frontend   │
+              │  ├─ /api/*       → api        │
+              │  ├─ /openstory/* → minio      │
+              │  └─ HTTP → HTTPS redirect     │
+              └──────────────┬────────────────┘
+                             │  Docker Network
+        ┌────────────────────┼────────────────────┐
+        │                    │                    │
+   ┌────▼─────┐  ┌──────────▼──┐  ┌──────────────▼──┐
+   │ Frontend │  │  API (Gin)  │  │ Worker (Asynq)  │
+   │ :3000    │  │  :8080      │  │                 │
+   └──────────┘  └──────┬──────┘  └────────┬────────┘
+                        │                  │
+          ┌─────────────┼──────────────────┼─────────────┐
+          │             │                  │             │
+     ┌────▼───┐  ┌──────▼──┐  ┌─────────▼┐  ┌─────────▼──┐
+     │Postgres│  │  Redis  │  │  Kafka   │  │   MinIO    │
+     │ :5432  │  │  :6379  │  │  :9092   │  │   :9000    │
+     └────────┘  └─────────┘  └────┬─────┘  └────────────┘
+                                   │
+                    ┌──────────────┼──────────────┐
+                    │              │              │
+               ┌────▼───┐  ┌──────▼──┐  ┌───────▼──────┐
+               │Outbox  │  │Consumer │  │Consumer ×4   │
+               │Relay   │  │Analytics│  │notification  │
+               │        │  │         │  │feed/mod/audit│
+               └────────┘  └─────────┘  └──────────────┘
+```
+
+### 快速部署
+
+```bash
+# 1. 配置环境变量
+cp .env.production .env
+# 编辑 .env，设置 MINIO_PUBLIC_ENDPOINT=https://你的域名
+
+# 2. 构建并启动所有服务
+./deploy.sh
+
+# 或分步操作
+docker compose -f docker-compose.prod.yml build --parallel
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### HTTPS 与证书
+
+默认使用自签名证书。获取 Let's Encrypt 正式证书（需要域名已解析到服务器）：
+
+```bash
+certbot certonly --webroot -w /var/www/certbot -d incipe.top
+# 将证书复制到 nginx/certs/ 后重建 nginx
+docker compose -f docker-compose.prod.yml build nginx
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**CloudFlare + 非标端口：** 如果 443 被限制，可使用 2053 端口（CloudFlare 支持的 HTTPS 源站端口）。在 CloudFlare 后台将源站端口设为 2053，SSL 模式设为 Full。
+
+### 部署命令
+
+```bash
+./deploy.sh              # 完整部署（检查 → 构建 → 启动）
+./deploy.sh status       # 查看所有服务状态
+./deploy.sh logs [svc]   # 查看日志
+./deploy.sh restart api  # 重启指定服务
+./deploy.sh stop         # 停止所有服务
+./deploy.sh migrate      # 手动执行数据库迁移
+
+# 备份
+./scripts/backup.sh db    # 备份数据库
+./scripts/backup.sh full  # 完整备份（含 MinIO）
+```
+
+### 生产端口
+
+| 端口 | 用途 | 公网 |
+|------|------|------|
+| 80 | HTTP → HTTPS 重定向 | ✅ |
+| 443 | HTTPS | ✅ |
+| 2053 | HTTPS（CloudFlare 源站） | ✅ |
+| 9000 | MinIO API（可关闭） | ⚠️ 可选 |
+
+其他服务端口仅 Docker 内网可见。
+
+### 容器资源限制
+
+适配 2C/2G 服务器，总计约 2.3GB：
+
+| 服务 | 内存 | CPU |
+|------|------|-----|
+| nginx | 64M | 0.25 |
+| frontend | 256M | 0.5 |
+| api | 256M | 0.5 |
+| worker | 256M | 0.5 |
+| postgres | 256M | 0.5 |
+| kafka | 768M | 1.0 |
+| redis | 128M | 0.25 |
+| minio | 256M | 0.5 |
+| outbox-relay | 64M | 0.25 |
+| consumer ×5 | 64M each | 0.25 each |
+
 ## API 端点
 
 | Method | Path | Auth | 描述 |
@@ -356,8 +469,11 @@ make build         # 构建二进制
 
 ## 端口映射
 
+### 开发环境
+
 | 服务 | 端口 |
 |---|---|
+| Nginx (生产) | `80`, `443`, `2053` |
 | API | `18080` |
 | API Metrics / pprof | `19094` |
 | Worker Metrics / pprof | `19095` |
@@ -372,6 +488,16 @@ make build         # 构建二进制
 | Audit Consumer Metrics / pprof | `19099` |
 | MinIO API | `19000` |
 | MinIO Console | `19001` |
+
+### 生产环境
+
+| 服务 | 端口 | 说明 |
+|---|---|---|
+| Nginx | `80` → HTTPS 重定向 | 公网 |
+| Nginx | `443` / `2053` HTTPS | 公网 |
+| MinIO API | `9000` | 公网（presigned URL） |
+| MinIO Console | `9001` | 仅 localhost |
+| 其他服务 | Docker 内网 | 不对外暴露 |
 
 ## License
 
