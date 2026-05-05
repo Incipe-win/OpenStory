@@ -43,6 +43,31 @@ internal/
 | 迁移 | goose |
 | 容器化 | Docker Compose |
 
+## 数据库 Schema
+
+共 16 张业务表，3 个迁移文件 (`migrations/`)：
+
+| 分类 | 表名 | 说明 |
+|---|---|---|
+| 用户 | `users` | 用户账户，支持 admin/user 角色 |
+| 用户 | `refresh_tokens` | JWT 刷新令牌 |
+| 项目 | `projects` | 视频创作项目 |
+| 项目 | `works` | 最终产出作品 |
+| 项目 | `assets` | MinIO 媒体资源 |
+| 工作流 | `workflows` | DAG 工作流定义 |
+| 工作流 | `workflow_nodes` | DAG 节点 |
+| 工作流 | `workflow_edges` | DAG 边 |
+| 工作流 | `workflow_versions` | 工作流版本快照 |
+| 任务 | `generation_tasks` | AI 生成任务 (幂等键) |
+| 任务 | `task_events` | 任务状态变更事件 |
+| 事件 | `outbox_events` | 事务性 Outbox (BIGSERIAL) |
+| 计费 | `credit_accounts` | 积分账户 (CHECK >= 0) |
+| 计费 | `credit_ledger` | 积分流水 |
+| 审核 | `moderation_records` | 内容审核记录 |
+| 审计 | `audit_logs` | 操作审计日志 |
+
+**Seed 数据**: admin 用户 (10000 积分) + demo 用户 (500 积分) + 示例项目
+
 ## 快速开始
 
 ### 前置条件
