@@ -1,0 +1,111 @@
+# OpenStory
+
+> 开源自托管 AI 视频创作工作流平台 — 输入创意，生成剧本、角色、分镜、图片/视频，合成 15-30 秒预览视频。
+
+## 架构
+
+```
+cmd/
+  api/            HTTP API 服务器 (Gin)
+  worker/         Asynq 异步任务 worker
+  outbox-relay/   Outbox → Kafka 事件中继
+  consumer/       Kafka 事件消费者
+
+internal/
+  config/         环境变量配置
+  observability/  zerolog 日志、OpenTelemetry (TODO)
+  db/             PostgreSQL 连接池 (pgx)
+  http/           Gin 路由、中间件、Handler
+  auth/           认证授权 (TODO)
+  project/        项目管理 (TODO)
+  workflow/       工作流 DAG 编排 (TODO)
+  task/           任务执行 (TODO)
+  asset/          MinIO 资源管理 (TODO)
+  provider/       AI 模型供应商网关 (TODO)
+  eventbus/       Kafka 事件总线 (TODO)
+  outbox/         Outbox Pattern (TODO)
+  consumer/       事件消费处理 (TODO)
+  billing/        积分计费 (TODO)
+  moderation/     内容审核 (TODO)
+```
+
+## 技术栈
+
+| 组件 | 技术 |
+|---|---|
+| 语言 | Go 1.26 |
+| HTTP | Gin |
+| 数据库 | PostgreSQL 17 (pgx) |
+| 缓存 | Redis 8 |
+| 消息队列 | Apache Kafka 4.2.0 |
+| 对象存储 | MinIO |
+| 日志 | zerolog |
+| 迁移 | goose |
+| 容器化 | Docker Compose |
+
+## 快速开始
+
+### 前置条件
+
+- Go 1.26+
+- Docker & Docker Compose
+- (可选) goose, golangci-lint
+
+### 启动所有服务
+
+```bash
+# 复制环境变量
+cp .env.example .env
+
+# 启动所有服务 (PostgreSQL, Redis, Kafka, MinIO, API, Worker)
+make dev
+
+# 或只启动基础设施，本地运行 API
+make dev-infra
+make migrate
+go run ./cmd/api
+```
+
+### 验证
+
+```bash
+# 健康检查
+curl http://localhost:18080/healthz
+
+# 深度就绪检查
+curl http://localhost:18080/readyz
+```
+
+### 常用命令
+
+```bash
+make help          # 查看所有命令
+make dev           # 启动所有服务
+make stop          # 停止所有服务
+make test          # 运行测试
+make lint          # 代码检查
+make migrate       # 数据库迁移
+make build         # 构建二进制
+```
+
+## API 端点
+
+| Method | Path | 描述 |
+|---|---|---|
+| GET | `/healthz` | 存活探针 |
+| GET | `/readyz` | 就绪探针 (检查 DB + Redis) |
+
+## 端口映射
+
+| 服务 | 端口 |
+|---|---|
+| API | `18080` |
+| PostgreSQL | `15432` |
+| Redis | `16379` |
+| Kafka | `19092` |
+| MinIO API | `19000` |
+| MinIO Console | `19001` |
+
+## License
+
+MIT
