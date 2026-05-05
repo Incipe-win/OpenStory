@@ -19,13 +19,13 @@ internal/
   auth/           认证授权 (TODO)
   project/        项目管理 (TODO)
   workflow/       工作流 DAG 编排 (TODO)
-  task/           任务执行 (TODO)
+  task/           Asynq 生成任务执行
   asset/          MinIO 资源管理 (TODO)
   provider/       AI 模型供应商网关 (TODO)
-  eventbus/       Kafka 事件总线 (TODO)
-  outbox/         Outbox Pattern (TODO)
+  eventbus/       EventBus 接口、OutboxWriter、KafkaEventBus
+  outbox/         Outbox Relay + Prometheus 指标
   consumer/       事件消费处理 (TODO)
-  billing/        积分计费 (TODO)
+  billing/        积分流水与 credit.events
   moderation/     内容审核 (TODO)
 ```
 
@@ -41,6 +41,7 @@ internal/
 | 对象存储 | MinIO |
 | 日志 | zerolog |
 | 迁移 | goose |
+| 指标 | Prometheus client |
 | 容器化 | Docker Compose |
 
 ## 数据库 Schema
@@ -68,6 +69,46 @@ internal/
 
 **Seed 数据**: admin 用户 (10000 积分) + demo 用户 (500 积分) + 示例项目
 
+## 事件总线与 Outbox
+
+业务代码只依赖 `eventbus.EventBus`，默认实现是 `OutboxWriter`，所有业务事件先写入 `outbox_events`。`cmd/outbox-relay` 轮询未发布事件，投递到 Kafka 后写入 `published_at`；失败时递增 `retry_count` 并记录 `last_error`，下轮继续重试。
+
+事件 envelope 字段：
+
+```json
+{
+  "event_id": "uuid",
+  "event_type": "task_created",
+  "aggregate_type": "generation_task",
+  "aggregate_id": "uuid",
+  "user_id": "uuid",
+  "trace_id": "optional",
+  "schema_version": 1,
+  "occurred_at": "RFC3339 timestamp",
+  "payload": {}
+}
+```
+
+Kafka topics：
+
+| Topic | 用途 |
+|---|---|
+| `generation.task.events` | 任务创建、排队、运行、成功、失败、取消、重试 |
+| `asset.events` | 素材创建 |
+| `work.events` | 作品发布 |
+| `credit.events` | 积分扣减/流水 |
+| `moderation.events` | 内容审核 |
+| `audit.events` | 审计事件 |
+| `notification.events` | 通知事件 |
+
+Outbox Relay 指标暴露在 `http://localhost:19090/metrics`：
+
+| Metric | 说明 |
+|---|---|
+| `openstory_outbox_backlog_total` | 未发布 outbox 事件数量 |
+| `openstory_outbox_failures_total` | Kafka 投递失败次数 |
+| `openstory_outbox_publish_duration_seconds` | Kafka 投递耗时 |
+
 ## 快速开始
 
 ### 前置条件
@@ -82,7 +123,7 @@ internal/
 # 复制环境变量
 cp .env.example .env
 
-# 启动所有服务 (PostgreSQL, Redis, Kafka, MinIO, API, Worker)
+# 启动所有服务 (PostgreSQL, Redis, Kafka, MinIO, API, Worker, Outbox Relay)
 make dev
 
 # 或只启动基础设施，本地运行 API
@@ -148,6 +189,7 @@ make build         # 构建二进制
 | PostgreSQL | `15432` |
 | Redis | `16379` |
 | Kafka | `19092` |
+| Outbox Relay Metrics | `19090` |
 | MinIO API | `19000` |
 | MinIO Console | `19001` |
 

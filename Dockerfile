@@ -43,3 +43,14 @@ RUN apk add --no-cache ca-certificates ffmpeg
 COPY --from=builder /bin/worker /usr/local/bin/worker
 
 ENTRYPOINT ["worker"]
+
+# ============================================================
+# Stage 4: Outbox Relay runtime
+# ============================================================
+FROM alpine:3.21 AS outbox-relay
+
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /bin/outbox-relay /usr/local/bin/outbox-relay
+
+EXPOSE 9090
+ENTRYPOINT ["outbox-relay"]

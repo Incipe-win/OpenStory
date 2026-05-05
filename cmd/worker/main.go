@@ -9,8 +9,10 @@ import (
 
 	"github.com/hibiken/asynq"
 
+	"github.com/Incipe-win/OpenStory/internal/billing"
 	"github.com/Incipe-win/OpenStory/internal/config"
 	"github.com/Incipe-win/OpenStory/internal/db"
+	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/observability"
 	"github.com/Incipe-win/OpenStory/internal/provider"
 	"github.com/Incipe-win/OpenStory/internal/task"
@@ -44,7 +46,9 @@ func main() {
 
 	// ── Task Processor ───────────────────────────────
 	taskRepo := task.NewPgRepository(pool)
-	processor := task.NewProcessor(taskRepo, registry, log)
+	outboxWriter := eventbus.NewOutboxWriter(pool)
+	billingSvc := billing.NewPgService(pool, outboxWriter)
+	processor := task.NewProcessor(taskRepo, registry, outboxWriter, billingSvc, log)
 
 	// ── Asynq Server ─────────────────────────────────
 	srv := asynq.NewServer(

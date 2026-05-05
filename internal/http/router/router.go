@@ -11,6 +11,7 @@ import (
 	"github.com/Incipe-win/OpenStory/internal/audit"
 	authpkg "github.com/Incipe-win/OpenStory/internal/auth"
 	"github.com/Incipe-win/OpenStory/internal/config"
+	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/http/handler"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/project"
@@ -49,6 +50,7 @@ func New(deps Deps) *gin.Engine {
 		deps.Config.JWT.RefreshTokenTTL,
 	)
 	auditLog := audit.NewLogger(deps.Pool)
+	outboxWriter := eventbus.NewOutboxWriter(deps.Pool)
 	authRepo := authpkg.NewPgRepository(deps.Pool)
 	projRepo := project.NewPgRepository(deps.Pool)
 	wfRepo := workflow.NewPgRepository(deps.Pool)
@@ -56,9 +58,9 @@ func New(deps Deps) *gin.Engine {
 
 	// ── Handlers ─────────────────────────────────────
 	authH := handler.NewAuthHandler(authRepo, jwtSvc, auditLog, deps.Log)
-	projH := handler.NewProjectHandler(projRepo, auditLog, deps.Log)
+	projH := handler.NewProjectHandler(projRepo, auditLog, outboxWriter, deps.Log)
 	wfH := handler.NewWorkflowHandler(wfRepo, auditLog, deps.Log)
-	taskH := handler.NewTaskHandler(taskRepo, deps.AsynqClient, auditLog, deps.Log)
+	taskH := handler.NewTaskHandler(taskRepo, deps.AsynqClient, auditLog, outboxWriter, deps.Log)
 
 	// ── Public routes ────────────────────────────────
 	api := r.Group("/api")

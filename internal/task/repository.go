@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	ErrTaskNotFound       = errors.New("task not found")
+	ErrTaskNotFound        = errors.New("task not found")
 	ErrIdempotencyConflict = errors.New("task with this idempotency key already exists")
 )
 
@@ -23,6 +23,7 @@ type Repository interface {
 	GetByIdempotencyKey(ctx context.Context, key string) (*GenerationTask, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID, page, pageSize int) ([]GenerationTask, int, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string, output *json.RawMessage, errMsg *string) error
+	UpdateCost(ctx context.Context, id uuid.UUID, costCredits int) error
 	SetRunning(ctx context.Context, id uuid.UUID) error
 	IncrRetry(ctx context.Context, id uuid.UUID) error
 	Cancel(ctx context.Context, id uuid.UUID) error
@@ -144,6 +145,16 @@ func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		tag = status
 	}
 	_ = tag
+	return nil
+}
+
+func (r *PgRepository) UpdateCost(ctx context.Context, id uuid.UUID, costCredits int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE generation_tasks SET cost_credits = $2 WHERE id = $1`,
+		id, costCredits)
+	if err != nil {
+		return fmt.Errorf("update cost: %w", err)
+	}
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/Incipe-win/OpenStory/internal/audit"
+	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/project"
 )
@@ -16,12 +17,13 @@ import (
 type ProjectHandler struct {
 	repo     project.Repository
 	auditLog *audit.Logger
+	outbox   eventbus.EventBus
 	log      zerolog.Logger
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(repo project.Repository, auditLog *audit.Logger, log zerolog.Logger) *ProjectHandler {
-	return &ProjectHandler{repo: repo, auditLog: auditLog, log: log}
+func NewProjectHandler(repo project.Repository, auditLog *audit.Logger, outbox eventbus.EventBus, log zerolog.Logger) *ProjectHandler {
+	return &ProjectHandler{repo: repo, auditLog: auditLog, outbox: outbox, log: log}
 }
 
 type createProjectRequest struct {
@@ -171,6 +173,14 @@ func (h *ProjectHandler) PublishWork(c *gin.Context) {
 	})
 
 	work, _ := h.repo.GetWork(c.Request.Context(), id)
+	if h.outbox != nil && work != nil {
+		_ = h.outbox.Publish(c.Request.Context(), eventbus.TopicWorkEvents,
+			eventbus.NewEvent("work_published", "work", id, map[string]any{
+				"project_id": work.ProjectID,
+				"title":      work.Title,
+				"status":     work.Status,
+			}).WithUser(userID))
+	}
 	OK(c, work)
 }
 

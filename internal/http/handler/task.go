@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/Incipe-win/OpenStory/internal/audit"
+	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/task"
 )
@@ -20,11 +21,12 @@ type TaskHandler struct {
 	repo        task.Repository
 	asynqClient *asynq.Client
 	auditLog    *audit.Logger
+	outbox      eventbus.EventBus
 	log         zerolog.Logger
 }
 
-func NewTaskHandler(repo task.Repository, asynqClient *asynq.Client, auditLog *audit.Logger, log zerolog.Logger) *TaskHandler {
-	return &TaskHandler{repo: repo, asynqClient: asynqClient, auditLog: auditLog, log: log}
+func NewTaskHandler(repo task.Repository, asynqClient *asynq.Client, auditLog *audit.Logger, outbox eventbus.EventBus, log zerolog.Logger) *TaskHandler {
+	return &TaskHandler{repo: repo, asynqClient: asynqClient, auditLog: auditLog, outbox: outbox, log: log}
 }
 
 // ── Create ──────────────────────────────────────────
@@ -96,6 +98,9 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		"type":     t.Type,
 		"provider": t.Provider,
 	})
+	h.publishTaskEvent(c, "task_created", t, map[string]any{
+		"status": task.StatusPending,
+	})
 
 	// Enqueue Asynq job
 	asynqTask, err := task.NewAsynqTask(t.ID)
@@ -120,6 +125,11 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		"queue":    info.Queue,
 	})
 	t.Status = task.StatusQueued
+	h.publishTaskEvent(c, "task_queued", t, map[string]any{
+		"status":   task.StatusQueued,
+		"asynq_id": info.ID,
+		"queue":    info.Queue,
+	})
 
 	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
 		UserID: &userID, Action: "create_task", ResourceType: "generation_task", ResourceID: &t.ID,
@@ -236,6 +246,10 @@ func (h *TaskHandler) Cancel(c *gin.Context) {
 	})
 
 	t.Status = task.StatusCanceled
+	h.publishTaskEvent(c, "task_canceled", t, map[string]any{
+		"status":      task.StatusCanceled,
+		"canceled_by": userID,
+	})
 	OK(c, t)
 }
 
@@ -282,4 +296,15 @@ func (h *TaskHandler) Events(c *gin.Context) {
 
 func marshalJSON(v any) ([]byte, error) {
 	return json.Marshal(v)
+}
+
+func (h *TaskHandler) publishTaskEvent(c *gin.Context, eventType string, t *task.GenerationTask, payload map[string]any) {
+	if h.outbox == nil {
+		return
+	}
+	payload["task_type"] = t.Type
+	payload["provider"] = t.Provider
+	payload["project_id"] = t.ProjectID
+	_ = h.outbox.Publish(c.Request.Context(), eventbus.TopicGenerationTaskEvents,
+		eventbus.NewEvent(eventType, "generation_task", t.ID, payload).WithUser(t.UserID))
 }

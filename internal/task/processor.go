@@ -10,6 +10,8 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/rs/zerolog"
 
+	"github.com/Incipe-win/OpenStory/internal/billing"
+	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/provider"
 )
 
@@ -34,14 +36,16 @@ func NewAsynqTask(taskID uuid.UUID) (*asynq.Task, error) {
 
 // Processor handles Asynq generation tasks.
 type Processor struct {
-	repo     Repository
-	registry *provider.Registry
-	log      zerolog.Logger
+	repo       Repository
+	registry   *provider.Registry
+	outbox     eventbus.EventBus
+	billingSvc billing.Service
+	log        zerolog.Logger
 }
 
 // NewProcessor creates a new task processor.
-func NewProcessor(repo Repository, registry *provider.Registry, log zerolog.Logger) *Processor {
-	return &Processor{repo: repo, registry: registry, log: log}
+func NewProcessor(repo Repository, registry *provider.Registry, outbox eventbus.EventBus, billingSvc billing.Service, log zerolog.Logger) *Processor {
+	return &Processor{repo: repo, registry: registry, outbox: outbox, billingSvc: billingSvc, log: log}
 }
 
 // ProcessTask is called by Asynq when a generation task is dequeued.
@@ -75,16 +79,21 @@ func (p *Processor) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	_ = p.repo.AddEvent(ctx, task.ID, EventStarted, map[string]any{
 		"retry_count": task.RetryCount,
 	})
+	p.publishTaskEvent(ctx, "task_started", task, map[string]any{
+		"status":      StatusRunning,
+		"retry_count": task.RetryCount,
+	})
 
 	// Get provider
 	providerName := task.Provider
 	if providerName == "" {
 		providerName = "mock"
+		task.Provider = providerName
 	}
 	prov, ok := p.registry.Get(providerName)
 	if !ok {
 		errMsg := fmt.Sprintf("provider %q not registered", providerName)
-		p.failTask(ctx, task.ID, errMsg, log)
+		p.failTask(ctx, task, errMsg, log)
 		return nil // Don't retry unknown provider
 	}
 
@@ -103,6 +112,10 @@ func (p *Processor) ProcessTask(ctx context.Context, t *asynq.Task) error {
 			_ = p.repo.AddEvent(context.Background(), task.ID, EventCanceled, map[string]any{
 				"reason": ctx.Err().Error(),
 			})
+			p.publishTaskEvent(context.Background(), "task_canceled", task, map[string]any{
+				"status": StatusCanceled,
+				"reason": ctx.Err().Error(),
+			})
 			log.Info().Msg("task canceled via context")
 			return nil
 		}
@@ -112,6 +125,10 @@ func (p *Processor) ProcessTask(ctx context.Context, t *asynq.Task) error {
 		_ = p.repo.IncrRetry(ctx, task.ID)
 		_ = p.repo.AddEvent(ctx, task.ID, EventRetried, map[string]any{
 			"error": errMsg,
+		})
+		p.publishTaskEvent(ctx, "task_retried", task, map[string]any{
+			"status": StatusRunning,
+			"error":  errMsg,
 		})
 		log.Warn().Err(err).Msg("provider returned error, will retry")
 		return err // Asynq will retry
@@ -127,11 +144,18 @@ func (p *Processor) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	_ = p.repo.AddEvent(ctx, task.ID, EventCompleted, map[string]any{
 		"cost_credits": result.CostCredits,
 	})
+	p.publishTaskEvent(ctx, "task_succeeded", task, map[string]any{
+		"status":       StatusSucceeded,
+		"cost_credits": result.CostCredits,
+	})
 
-	// Update cost
-	_, _ = p.repo.(*PgRepository).pool.Exec(ctx,
-		`UPDATE generation_tasks SET cost_credits = $2 WHERE id = $1`,
-		task.ID, result.CostCredits)
+	_ = p.repo.UpdateCost(ctx, task.ID, result.CostCredits)
+
+	if p.billingSvc != nil && result.CostCredits > 0 {
+		if _, err := p.billingSvc.Spend(ctx, task.UserID, result.CostCredits, "generation_task", task.ID, "AI generation task"); err != nil {
+			log.Warn().Err(err).Int("cost", result.CostCredits).Msg("credit spend skipped")
+		}
+	}
 
 	log.Info().
 		Int("cost", result.CostCredits).
@@ -140,8 +164,23 @@ func (p *Processor) ProcessTask(ctx context.Context, t *asynq.Task) error {
 	return nil
 }
 
-func (p *Processor) failTask(ctx context.Context, taskID uuid.UUID, errMsg string, log zerolog.Logger) {
-	_ = p.repo.UpdateStatus(ctx, taskID, StatusFailed, nil, &errMsg)
-	_ = p.repo.AddEvent(ctx, taskID, EventFailed, map[string]any{"error": errMsg})
+func (p *Processor) failTask(ctx context.Context, task *GenerationTask, errMsg string, log zerolog.Logger) {
+	_ = p.repo.UpdateStatus(ctx, task.ID, StatusFailed, nil, &errMsg)
+	_ = p.repo.AddEvent(ctx, task.ID, EventFailed, map[string]any{"error": errMsg})
+	p.publishTaskEvent(ctx, "task_failed", task, map[string]any{
+		"status": StatusFailed,
+		"error":  errMsg,
+	})
 	log.Error().Str("error", errMsg).Msg("task failed permanently")
+}
+
+func (p *Processor) publishTaskEvent(ctx context.Context, eventType string, task *GenerationTask, payload map[string]any) {
+	if p.outbox == nil {
+		return
+	}
+	payload["task_type"] = task.Type
+	payload["provider"] = task.Provider
+	payload["project_id"] = task.ProjectID
+	_ = p.outbox.Publish(ctx, eventbus.TopicGenerationTaskEvents,
+		eventbus.NewEvent(eventType, "generation_task", task.ID, payload).WithUser(task.UserID))
 }

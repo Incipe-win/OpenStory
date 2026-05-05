@@ -144,6 +144,32 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # ─── Outbox Relay ─────────────────────────────────
+  outbox-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: outbox-relay
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-outbox-relay
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+    ports:
+      - "19090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   pgdata:
   redisdata:
