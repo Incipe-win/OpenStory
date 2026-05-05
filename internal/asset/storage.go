@@ -20,8 +20,9 @@ import (
 )
 
 type Storage struct {
-	client *minio.Client
-	bucket string
+	client        *minio.Client
+	bucket        string
+	publicBaseURL string
 }
 
 func NewStorage(cfg config.MinIOConfig) (*Storage, error) {
@@ -33,7 +34,11 @@ func NewStorage(cfg config.MinIOConfig) (*Storage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create minio client: %w", err)
 	}
-	return &Storage{client: client, bucket: cfg.Bucket}, nil
+	s := &Storage{client: client, bucket: cfg.Bucket}
+	if cfg.PublicEndpoint != "" {
+		s.publicBaseURL = strings.TrimRight(cfg.PublicEndpoint, "/") + "/" + cfg.Bucket
+	}
+	return s, nil
 }
 
 func (s *Storage) Bucket() string {
@@ -47,7 +52,19 @@ func (s *Storage) PresignedPutURL(ctx context.Context, key, contentType string, 
 	if expiry <= 0 {
 		expiry = 15 * time.Minute
 	}
-	return s.client.PresignedPutObject(ctx, s.bucket, key, expiry)
+	u, err := s.client.PresignedPutObject(ctx, s.bucket, key, expiry)
+	if err != nil {
+		return nil, err
+	}
+	if s.publicBaseURL != "" {
+		u.Path = "/" + s.bucket + "/" + key
+		u.Host = ""
+		u, err = url.Parse(s.publicBaseURL + "/" + key + "?" + u.RawQuery)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return u, nil
 }
 
 func (s *Storage) FGetObject(ctx context.Context, key, filePath string) error {

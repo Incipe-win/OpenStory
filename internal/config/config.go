@@ -54,12 +54,13 @@ type KafkaConfig struct {
 
 // MinIOConfig holds MinIO/S3 connection settings.
 type MinIOConfig struct {
-	Endpoint  string `env:"MINIO_ENDPOINT"   envDefault:"localhost:19000"`
-	AccessKey string `env:"MINIO_ACCESS_KEY" envDefault:"minioadmin"`
-	SecretKey string `env:"MINIO_SECRET_KEY" envDefault:"minioadmin"`
-	Bucket    string `env:"MINIO_BUCKET"     envDefault:"openstory"`
-	Region    string `env:"MINIO_REGION"     envDefault:"us-east-1"`
-	UseSSL    bool   `env:"MINIO_USE_SSL"    envDefault:"false"`
+	Endpoint       string `env:"MINIO_ENDPOINT"        envDefault:"localhost:19000"`
+	PublicEndpoint string `env:"MINIO_PUBLIC_ENDPOINT" envDefault:""`
+	AccessKey      string `env:"MINIO_ACCESS_KEY"      envDefault:"minioadmin"`
+	SecretKey      string `env:"MINIO_SECRET_KEY"      envDefault:"minioadmin"`
+	Bucket         string `env:"MINIO_BUCKET"          envDefault:"openstory"`
+	Region         string `env:"MINIO_REGION"          envDefault:"us-east-1"`
+	UseSSL         bool   `env:"MINIO_USE_SSL"         envDefault:"false"`
 }
 
 type ProviderConfig struct {
