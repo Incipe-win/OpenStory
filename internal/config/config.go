@@ -10,12 +10,15 @@ import (
 
 // Config holds all application configuration.
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Kafka    KafkaConfig
-	MinIO    MinIOConfig
-	JWT      JWTConfig
+	Server        ServerConfig
+	Database      DatabaseConfig
+	Redis         RedisConfig
+	Kafka         KafkaConfig
+	MinIO         MinIOConfig
+	JWT           JWTConfig
+	Provider      ProviderConfig
+	Limits        LimitsConfig
+	Observability ObservabilityConfig
 }
 
 // JWTConfig holds JWT token settings.
@@ -55,7 +58,34 @@ type MinIOConfig struct {
 	AccessKey string `env:"MINIO_ACCESS_KEY" envDefault:"minioadmin"`
 	SecretKey string `env:"MINIO_SECRET_KEY" envDefault:"minioadmin"`
 	Bucket    string `env:"MINIO_BUCKET"     envDefault:"openstory"`
+	Region    string `env:"MINIO_REGION"     envDefault:"us-east-1"`
 	UseSSL    bool   `env:"MINIO_USE_SSL"    envDefault:"false"`
+}
+
+type ProviderConfig struct {
+	MaxAttempts             int    `env:"PROVIDER_MAX_ATTEMPTS"                  envDefault:"2"`
+	ConfigEncryptionKey     string `env:"PROVIDER_CONFIG_ENCRYPTION_KEY"         envDefault:""`
+	OpenAICompatibleBaseURL string `env:"OPENAI_COMPATIBLE_BASE_URL"            envDefault:"https://api.openai.com/v1"`
+	OpenAICompatibleModel   string `env:"OPENAI_COMPATIBLE_MODEL"               envDefault:"gpt-4o-mini"`
+	OpenAICompatibleAPIKey  string `env:"OPENAI_COMPATIBLE_API_KEY"             envDefault:""`
+	ComfyUIBaseURL          string `env:"COMFYUI_BASE_URL"                      envDefault:""`
+	ComfyUIAPIKey           string `env:"COMFYUI_API_KEY"                       envDefault:""`
+	ReplicateBaseURL        string `env:"REPLICATE_BASE_URL"                    envDefault:"https://api.replicate.com/v1"`
+	ReplicateAPIToken       string `env:"REPLICATE_API_TOKEN"                   envDefault:""`
+}
+
+type LimitsConfig struct {
+	UserRequestsPerMinute int `env:"RATE_LIMIT_USER_PER_MINUTE" envDefault:"120"`
+	IPRequestsPerMinute   int `env:"RATE_LIMIT_IP_PER_MINUTE"   envDefault:"300"`
+	TaskConcurrentLimit   int `env:"TASK_CONCURRENT_LIMIT"      envDefault:"5"`
+}
+
+type ObservabilityConfig struct {
+	ServiceName     string `env:"OTEL_SERVICE_NAME"             envDefault:"openstory"`
+	TracingEnabled  bool   `env:"OTEL_TRACES_ENABLED"          envDefault:"false"`
+	OTLPEndpoint    string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"  envDefault:"localhost:4318"`
+	OTLPInsecure    bool   `env:"OTEL_EXPORTER_OTLP_INSECURE"  envDefault:"true"`
+	DiagnosticsAddr string `env:"OBSERVABILITY_ADDR"           envDefault:":9090"`
 }
 
 // Load parses environment variables into a Config struct.

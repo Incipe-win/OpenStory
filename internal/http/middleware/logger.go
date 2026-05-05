@@ -6,6 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
+
+	"github.com/Incipe-win/OpenStory/internal/observability"
 )
 
 // Logger returns a Gin middleware that logs each request using zerolog.
@@ -22,6 +24,8 @@ func Logger(log zerolog.Logger) gin.HandlerFunc {
 		}
 
 		log.Info().
+			Str("request_id", observability.RequestIDFromContext(c.Request.Context())).
+			Str("trace_id", observability.TraceIDFromContext(c.Request.Context())).
 			Str("method", c.Request.Method).
 			Str("path", path).
 			Int("status", c.Writer.Status()).

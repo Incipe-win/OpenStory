@@ -14,7 +14,7 @@ import (
 const (
 	KeyUserID   = "user_id"
 	KeyUsername = "username"
-	KeyRole    = "role"
+	KeyRole     = "role"
 )
 
 // Auth returns a Gin middleware that validates JWT access tokens.
@@ -59,4 +59,23 @@ func GetUserID(c *gin.Context) uuid.UUID {
 	v, _ := c.Get(KeyUserID)
 	uid, _ := v.(uuid.UUID)
 	return uid
+}
+
+func GetRole(c *gin.Context) string {
+	v, _ := c.Get(KeyRole)
+	role, _ := v.(string)
+	return role
+}
+
+func RequireRole(role string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if GetRole(c) != role {
+			c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+				"code": "FORBIDDEN", "message": "forbidden",
+			}})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }

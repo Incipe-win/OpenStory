@@ -134,16 +134,40 @@ func (r *PgRepository) GetWork(ctx context.Context, id uuid.UUID) (*Work, error)
 }
 
 func (r *PgRepository) PublishWork(ctx context.Context, id, userID uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx,
-		`UPDATE works SET status = 'published', published_at = NOW()
-		 WHERE id = $1 AND user_id = $2 AND status != 'published'`,
-		id, userID,
-	)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("publishing work: %w", err)
+		return fmt.Errorf("begin publish work tx: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var ownerID uuid.UUID
+	if err := tx.QueryRow(ctx,
+		`SELECT user_id FROM works WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+		id, userID,
+	).Scan(&ownerID); errors.Is(err, pgx.ErrNoRows) {
 		return ErrWorkNotFound
+	} else if err != nil {
+		return fmt.Errorf("query work for review submission: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE works SET status = 'pending_review', published_at = NULL
+		 WHERE id = $1 AND user_id = $2`,
+		id, userID,
+	); err != nil {
+		return fmt.Errorf("marking work pending review: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO moderation_records (user_id, target_type, target_id, provider, status, categories_json)
+		 VALUES ($1, 'work', $2, 'internal', 'pending', '{}')
+		 ON CONFLICT (target_type, target_id)
+		 DO UPDATE SET status = 'pending', reason = NULL, reviewed_by = NULL, reviewed_at = NULL`,
+		userID, id,
+	); err != nil {
+		return fmt.Errorf("upsert moderation record: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit publish work tx: %w", err)
 	}
 	return nil
 }

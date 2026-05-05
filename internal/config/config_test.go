@@ -19,6 +19,12 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, "localhost:16379", cfg.Redis.Addr)
 	assert.Equal(t, []string{"localhost:19092"}, cfg.Kafka.Brokers)
 	assert.Equal(t, "openstory", cfg.MinIO.Bucket)
+	assert.Equal(t, "us-east-1", cfg.MinIO.Region)
+	assert.Equal(t, 120, cfg.Limits.UserRequestsPerMinute)
+	assert.Equal(t, 300, cfg.Limits.IPRequestsPerMinute)
+	assert.Equal(t, 5, cfg.Limits.TaskConcurrentLimit)
+	assert.Equal(t, "openstory", cfg.Observability.ServiceName)
+	assert.Equal(t, ":9090", cfg.Observability.DiagnosticsAddr)
 }
 
 func TestLoad_EnvOverride(t *testing.T) {

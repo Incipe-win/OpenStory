@@ -57,15 +57,18 @@ func setupTestEnv(t *testing.T) *testEnv {
 // cleanupAuthTestData removes test-auth user and associated data.
 func (e *testEnv) cleanupAuthTestData() {
 	ctx := context.Background()
-	e.pool.Exec(ctx, "DELETE FROM audit_logs WHERE ip_address = ''")
-	e.pool.Exec(ctx, "DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email = 'test-auth@example.com')")
-	e.pool.Exec(ctx, "DELETE FROM users WHERE email = 'test-auth@example.com'")
+	_, err := e.pool.Exec(ctx, "DELETE FROM audit_logs WHERE ip_address = ''")
+	require.NoError(e.t, err)
+	_, err = e.pool.Exec(ctx, "DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE email = 'test-auth@example.com')")
+	require.NoError(e.t, err)
+	_, err = e.pool.Exec(ctx, "DELETE FROM users WHERE email = 'test-auth@example.com'")
+	require.NoError(e.t, err)
 }
 
 func (e *testEnv) doJSON(method, path string, body any, token string) *httptest.ResponseRecorder {
 	var buf bytes.Buffer
 	if body != nil {
-		json.NewEncoder(&buf).Encode(body)
+		require.NoError(e.t, json.NewEncoder(&buf).Encode(body))
 	}
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
@@ -79,7 +82,7 @@ func (e *testEnv) doJSON(method, path string, body any, token string) *httptest.
 
 func (e *testEnv) parseBody(w *httptest.ResponseRecorder) map[string]any {
 	var result map[string]any
-	json.Unmarshal(w.Body.Bytes(), &result)
+	require.NoError(e.t, json.Unmarshal(w.Body.Bytes(), &result))
 	return result
 }
 
@@ -178,8 +181,10 @@ func TestProjectCRUD(t *testing.T) {
 
 	// Cleanup before and after
 	cleanupProjects := func() {
-		env.pool.Exec(context.Background(), "DELETE FROM audit_logs WHERE ip_address = ''")
-		env.pool.Exec(context.Background(), "DELETE FROM projects WHERE user_id = $1 AND name LIKE 'Test Project%'", demoUser.ID)
+		_, err := env.pool.Exec(context.Background(), "DELETE FROM audit_logs WHERE ip_address = ''")
+		require.NoError(t, err)
+		_, err = env.pool.Exec(context.Background(), "DELETE FROM projects WHERE user_id = $1 AND name LIKE 'Test Project%'", demoUser.ID)
+		require.NoError(t, err)
 	}
 	cleanupProjects()
 	t.Cleanup(cleanupProjects)
@@ -287,7 +292,7 @@ func TestUnifiedErrorResponse(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	var body map[string]any
-	json.Unmarshal(w.Body.Bytes(), &body)
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	errBody := body["error"].(map[string]any)
 	assert.Equal(t, "VALIDATION_ERROR", errBody["code"])
 }

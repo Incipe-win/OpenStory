@@ -54,3 +54,14 @@ COPY --from=builder /bin/outbox-relay /usr/local/bin/outbox-relay
 
 EXPOSE 9090
 ENTRYPOINT ["outbox-relay"]
+
+# ============================================================
+# Stage 5: Kafka Consumer runtime
+# ============================================================
+FROM alpine:3.21 AS consumer
+
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /bin/consumer /usr/local/bin/consumer
+
+EXPOSE 9090
+ENTRYPOINT ["consumer"]

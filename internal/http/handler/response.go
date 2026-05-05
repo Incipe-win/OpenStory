@@ -15,6 +15,7 @@ const (
 	CodeForbidden    = "FORBIDDEN"
 	CodeNotFound     = "NOT_FOUND"
 	CodeConflict     = "CONFLICT"
+	CodeRateLimited  = "RATE_LIMITED"
 	CodeInternal     = "INTERNAL_ERROR"
 )
 
@@ -53,6 +54,10 @@ func NotFound(c *gin.Context, msg string) {
 // Conflict sends a 409 error.
 func Conflict(c *gin.Context, msg string) {
 	respondError(c, http.StatusConflict, CodeConflict, msg)
+}
+
+func TooManyRequests(c *gin.Context, msg string) {
+	respondError(c, http.StatusTooManyRequests, CodeRateLimited, msg)
 }
 
 // InternalError sends a 500 error.

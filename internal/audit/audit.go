@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Incipe-win/OpenStory/internal/observability"
 )
 
 // Logger writes audit log entries to the database.
@@ -35,6 +37,9 @@ type Entry struct {
 
 // Log writes an audit entry to the database.
 func (l *Logger) Log(ctx context.Context, e Entry) error {
+	if e.TraceID == "" {
+		e.TraceID = observability.TraceIDFromContext(ctx)
+	}
 	oldJSON, _ := json.Marshal(e.OldValues)
 	newJSON, _ := json.Marshal(e.NewValues)
 

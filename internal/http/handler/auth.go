@@ -126,8 +126,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Store refresh token
 	rt := &auth.RefreshToken{
-		UserID:    user.ID,
-		TokenHash: refreshHash,
+		UserID:     user.ID,
+		TokenHash:  refreshHash,
 		DeviceInfo: c.GetHeader("User-Agent"),
 		IPAddress:  c.ClientIP(),
 		ExpiresAt:  time.Now().Add(h.jwt.RefreshTokenTTL()),
@@ -191,8 +191,8 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 	// Store new refresh token
 	newRT := &auth.RefreshToken{
-		UserID:    user.ID,
-		TokenHash: newRefreshHash,
+		UserID:     user.ID,
+		TokenHash:  newRefreshHash,
 		DeviceInfo: c.GetHeader("User-Agent"),
 		IPAddress:  c.ClientIP(),
 		ExpiresAt:  time.Now().Add(h.jwt.RefreshTokenTTL()),
@@ -202,6 +202,11 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		InternalError(c, "internal error")
 		return
 	}
+
+	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
+		UserID: &user.ID, Action: "refresh_token", ResourceType: "user", ResourceID: &user.ID,
+		IPAddress: c.ClientIP(), UserAgent: c.GetHeader("User-Agent"),
+	})
 
 	OK(c, tokenPair)
 }

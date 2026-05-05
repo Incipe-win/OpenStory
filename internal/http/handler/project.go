@@ -168,14 +168,14 @@ func (h *ProjectHandler) PublishWork(c *gin.Context) {
 	}
 
 	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
-		UserID: &userID, Action: "publish_work", ResourceType: "work", ResourceID: &id,
+		UserID: &userID, Action: "submit_work_for_review", ResourceType: "work", ResourceID: &id,
 		IPAddress: c.ClientIP(), UserAgent: c.GetHeader("User-Agent"),
 	})
 
 	work, _ := h.repo.GetWork(c.Request.Context(), id)
 	if h.outbox != nil && work != nil {
-		_ = h.outbox.Publish(c.Request.Context(), eventbus.TopicWorkEvents,
-			eventbus.NewEvent("work_published", "work", id, map[string]any{
+		_ = h.outbox.Publish(c.Request.Context(), eventbus.TopicModerationEvents,
+			eventbus.NewEvent("work_submitted_for_review", "work", id, map[string]any{
 				"project_id": work.ProjectID,
 				"title":      work.Title,
 				"status":     work.Status,

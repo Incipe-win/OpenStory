@@ -96,17 +96,27 @@ services:
     container_name: openstory-api
     ports:
       - "18080:8080"
+      - "19094:9090"
     environment:
       APP_ENV: development
       SERVER_PORT: "8080"
       DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: localhost:19000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: openstory
+      MINIO_REGION: us-east-1
       MINIO_USE_SSL: "false"
+      RATE_LIMIT_USER_PER_MINUTE: ${RATE_LIMIT_USER_PER_MINUTE:-120}
+      RATE_LIMIT_IP_PER_MINUTE: ${RATE_LIMIT_IP_PER_MINUTE:-300}
+      TASK_CONCURRENT_LIMIT: ${TASK_CONCURRENT_LIMIT:-5}
+      OBSERVABILITY_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -126,6 +136,8 @@ services:
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
     container_name: openstory-worker
+    ports:
+      - "19095:9090"
     environment:
       APP_ENV: development
       DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
@@ -135,7 +147,22 @@ services:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: openstory
+      MINIO_REGION: us-east-1
       MINIO_USE_SSL: "false"
+      PROVIDER_MAX_ATTEMPTS: ${PROVIDER_MAX_ATTEMPTS:-2}
+      PROVIDER_CONFIG_ENCRYPTION_KEY: ${PROVIDER_CONFIG_ENCRYPTION_KEY:-}
+      OPENAI_COMPATIBLE_BASE_URL: ${OPENAI_COMPATIBLE_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_COMPATIBLE_MODEL: ${OPENAI_COMPATIBLE_MODEL:-gpt-4o-mini}
+      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-}
+      COMFYUI_BASE_URL: ${COMFYUI_BASE_URL:-}
+      COMFYUI_API_KEY: ${COMFYUI_API_KEY:-}
+      REPLICATE_BASE_URL: ${REPLICATE_BASE_URL:-https://api.replicate.com/v1}
+      REPLICATE_API_TOKEN: ${REPLICATE_API_TOKEN:-}
+      OBSERVABILITY_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -160,8 +187,164 @@ services:
       DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
       REDIS_ADDR: redis:6379
       KAFKA_BROKERS: kafka:9092
+      OBSERVABILITY_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
     ports:
       - "19090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ─── Kafka Consumers ──────────────────────────────
+  analytics-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: consumer
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-analytics-consumer
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      CONSUMER_NAME: analytics-consumer
+      CONSUMER_METRICS_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
+    ports:
+      - "19091:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  notification-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: consumer
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-notification-consumer
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      CONSUMER_NAME: notification-consumer
+      CONSUMER_METRICS_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
+    ports:
+      - "19096:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  feed-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: consumer
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-feed-consumer
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      CONSUMER_NAME: feed-consumer
+      CONSUMER_METRICS_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
+    ports:
+      - "19097:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  moderation-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: consumer
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-moderation-consumer
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      CONSUMER_NAME: moderation-consumer
+      CONSUMER_METRICS_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
+    ports:
+      - "19098:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  audit-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: consumer
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-audit-consumer
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      CONSUMER_NAME: audit-consumer
+      CONSUMER_METRICS_ADDR: :9090
+      OTEL_SERVICE_NAME: openstory
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-host.docker.internal:4318}
+      OTEL_EXPORTER_OTLP_INSECURE: ${OTEL_EXPORTER_OTLP_INSECURE:-true}
+    ports:
+      - "19099:9090"
     depends_on:
       postgres:
         condition: service_healthy

@@ -106,7 +106,7 @@ func (r *PgRepository) Update(ctx context.Context, wf *Workflow, nodes []Node, e
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Update workflow metadata
 	tag, err := tx.Exec(ctx,
@@ -185,7 +185,7 @@ func (r *PgRepository) CreateSnapshot(ctx context.Context, workflowID, userID uu
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Increment version
 	newVersion := detail.CurrentVersion + 1

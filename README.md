@@ -13,20 +13,40 @@ cmd/
 
 internal/
   config/         环境变量配置
-  observability/  zerolog 日志、OpenTelemetry (TODO)
+  observability/  zerolog、OpenTelemetry、Prometheus、pprof
   db/             PostgreSQL 连接池 (pgx)
   http/           Gin 路由、中间件、Handler
   auth/           认证授权 (TODO)
   project/        项目管理 (TODO)
   workflow/       工作流 DAG 编排 (TODO)
   task/           Asynq 生成任务执行
-  asset/          MinIO 资源管理 (TODO)
-  provider/       AI 模型供应商网关 (TODO)
+  asset/          MinIO/S3 素材元数据、预签名上传、对象存储
+  provider/       Provider 抽象、结构化 JSON、调用日志
   eventbus/       EventBus 接口、OutboxWriter、KafkaEventBus
   outbox/         Outbox Relay + Prometheus 指标
-  consumer/       事件消费处理 (TODO)
+  consumer/       Consumer group、幂等消费、DLQ、消费指标
   billing/        积分流水与 credit.events
-  moderation/     内容审核 (TODO)
+  moderation/     内容审核和管理员审核
+```
+
+```mermaid
+flowchart LR
+  Client[Web / API Client] --> API[cmd/api Gin]
+  API --> PG[(PostgreSQL)]
+  API --> Redis[(Redis / Asynq)]
+  API --> MinIO[(MinIO / S3)]
+  Redis --> Worker[cmd/worker]
+  Worker --> Provider[Provider Gateway]
+  Worker --> MinIO
+  Worker --> PG
+  PG --> Outbox[cmd/outbox-relay]
+  Outbox --> Kafka[(Kafka topics)]
+  Kafka --> Consumers[cmd/consumer groups]
+  Consumers --> PG
+  API -. traces / metrics / pprof .-> Obs[Prometheus + OTel Collector + Grafana]
+  Worker -. traces / metrics / pprof .-> Obs
+  Outbox -. traces / metrics / pprof .-> Obs
+  Consumers -. traces / metrics / pprof .-> Obs
 ```
 
 ## 技术栈
@@ -46,7 +66,7 @@ internal/
 
 ## 数据库 Schema
 
-共 16 张业务表，3 个迁移文件 (`migrations/`)：
+基础 schema 包含 16 张业务表，消费者迁移额外维护幂等表、失败表和读模型表：
 
 | 分类 | 表名 | 说明 |
 |---|---|---|
@@ -66,6 +86,13 @@ internal/
 | 计费 | `credit_ledger` | 积分流水 |
 | 审核 | `moderation_records` | 内容审核记录 |
 | 审计 | `audit_logs` | 操作审计日志 |
+| 消费 | `consumer_processed_events` | 消费者幂等记录 |
+| 消费 | `consumer_failures` | 消费失败次数和错误 |
+| 分析 | `analytics_task_metrics` | 任务成功率、耗时、成本聚合 |
+| 通知 | `notifications` | 任务完成通知 |
+| Feed | `feed_items` | 作品发布 feed 索引 |
+| Provider | `provider_configs` | 加密 provider 配置 |
+| Provider | `provider_call_logs` | provider 耗时、错误、成本记录 |
 
 **Seed 数据**: admin 用户 (10000 积分) + demo 用户 (500 积分) + 示例项目
 
@@ -82,6 +109,8 @@ internal/
   "aggregate_type": "generation_task",
   "aggregate_id": "uuid",
   "user_id": "uuid",
+  "request_id": "optional",
+  "traceparent": "optional W3C trace context",
   "trace_id": "optional",
   "schema_version": 1,
   "occurred_at": "RFC3339 timestamp",
@@ -100,6 +129,7 @@ Kafka topics：
 | `moderation.events` | 内容审核 |
 | `audit.events` | 审计事件 |
 | `notification.events` | 通知事件 |
+| `openstory.dlq` | 消费失败死信队列 |
 
 Outbox Relay 指标暴露在 `http://localhost:19090/metrics`：
 
@@ -108,6 +138,121 @@ Outbox Relay 指标暴露在 `http://localhost:19090/metrics`：
 | `openstory_outbox_backlog_total` | 未发布 outbox 事件数量 |
 | `openstory_outbox_failures_total` | Kafka 投递失败次数 |
 | `openstory_outbox_publish_duration_seconds` | Kafka 投递耗时 |
+
+## Kafka Consumers
+
+`cmd/consumer` 通过 `CONSUMER_NAME` 启动不同消费者，每个消费者使用独立 consumer group。消费流程是 at-least-once：先 `FetchMessage`，在 DB 事务内插入 `consumer_processed_events` 幂等记录并执行 handler，事务成功后再提交 Kafka offset。处理失败时写入 `consumer_failures`，投递 `openstory.dlq` 成功后提交源消息，避免毒消息阻塞分区。
+
+| Consumer | Topic | Side effect |
+|---|---|---|
+| `analytics-consumer` | `generation.task.events` | 聚合任务成功率、平均耗时、模型成本 |
+| `notification-consumer` | `generation.task.events` | 任务终态后写 `notifications` |
+| `feed-consumer` | `work.events` | 作品发布后 upsert `feed_items` |
+| `moderation-consumer` | `work.events` | 作品发布后写入 `moderation_records` 待审核 |
+| `audit-consumer` | `audit.events` | 审计事件落库到 `audit_logs` |
+
+消费者指标：
+
+| Metric | 说明 |
+|---|---|
+| `openstory_consumer_kafka_lag` | 按 consumer/topic/partition 暴露 Kafka lag |
+| `openstory_consumer_consume_duration_seconds` | 消费处理耗时 |
+| `openstory_consumer_failures_total` | 消费失败次数 |
+| `openstory_consumer_failure_rate` | 进程启动后的消费失败率 |
+
+## 观测
+
+所有进程都会暴露 Prometheus metrics 和 pprof。API 请求会生成或透传 `X-Request-ID`，并通过 W3C `traceparent` 贯穿 API、Asynq worker、Outbox、Kafka consumer。日志、outbox envelope、Kafka headers 都包含 `request_id` / `trace_id`。
+
+| 进程 | Metrics / pprof |
+|---|---|
+| API | `http://localhost:19094/metrics`, `http://localhost:19094/debug/pprof/` |
+| Worker | `http://localhost:19095/metrics`, `http://localhost:19095/debug/pprof/` |
+| Outbox Relay | `http://localhost:19090/metrics`, `http://localhost:19090/debug/pprof/` |
+| Analytics Consumer | `http://localhost:19091/metrics`, `http://localhost:19091/debug/pprof/` |
+| Notification Consumer | `http://localhost:19096/metrics`, `http://localhost:19096/debug/pprof/` |
+| Feed Consumer | `http://localhost:19097/metrics`, `http://localhost:19097/debug/pprof/` |
+| Moderation Consumer | `http://localhost:19098/metrics`, `http://localhost:19098/debug/pprof/` |
+| Audit Consumer | `http://localhost:19099/metrics`, `http://localhost:19099/debug/pprof/` |
+
+核心指标：
+
+| Metric | 说明 |
+|---|---|
+| `openstory_api_request_duration_seconds` | API 延迟 |
+| `openstory_task_success_rate` | 任务成功率 |
+| `openstory_task_duration_seconds` | 任务耗时 |
+| `openstory_queue_backlog_total` | Asynq 队列积压 |
+| `openstory_consumer_kafka_lag` | Kafka lag |
+| `openstory_provider_error_rate` | Provider 错误率 |
+| `openstory_ffmpeg_duration_seconds` | FFmpeg 耗时 |
+| `openstory_billing_failure_rate` | 积分扣费失败率 |
+
+OpenTelemetry 默认关闭。启用后进程会通过 OTLP/HTTP 上报 trace：
+
+```bash
+OTEL_TRACES_ENABLED=true
+OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4318
+OTEL_SERVICE_NAME=openstory
+```
+
+Grafana dashboard 位于 `observability/grafana/openstory-dashboard.json`。
+
+## Provider Gateway
+
+Provider 层不绑定单一模型，worker 只通过能力接口调用：
+
+| 能力 | 接口 | 状态 |
+|---|---|---|
+| TextGenerate | `TextGenerator` | Mock + OpenAI-compatible |
+| ImageGenerate | `ImageGenerator` | Mock + ComfyUI/Replicate adapter skeleton |
+| VideoGenerate | `VideoGenerator` | Mock + ComfyUI/Replicate adapter skeleton |
+| Embedding | `EmbeddingGenerator` | 接口预留 |
+
+已实现 provider：
+
+| Provider | 名称 | 说明 |
+|---|---|---|
+| Mock | `mock` | 本地结构化输出，覆盖创意到分镜闭环和图片/视频 mock |
+| OpenAI-compatible | `openai-compatible` | `/chat/completions` 文本生成，使用 `response_format=json_schema` |
+| ComfyUI | `comfyui` | `/prompt` adapter 骨架 |
+| Replicate | `replicate` | `/predictions` adapter 骨架 |
+
+文本生成阶段强制结构化 JSON，并使用 JSON Schema 校验。Schema 校验失败会按 `PROVIDER_MAX_ATTEMPTS` 重试；仍失败时降级为本地结构化 fallback，避免任务输出变成不可解析文本。当前闭环支持：
+
+```text
+idea -> script -> characters -> storyboard -> image prompts -> video prompts
+```
+
+API key 只能从环境变量或 `provider_configs` 加密配置读取，不能写死在代码里。数据库配置使用 AES-GCM 加密，解密密钥来自 `PROVIDER_CONFIG_ENCRYPTION_KEY`。
+
+Provider 相关环境变量：
+
+```bash
+PROVIDER_MAX_ATTEMPTS=2
+PROVIDER_CONFIG_ENCRYPTION_KEY=
+OPENAI_COMPATIBLE_BASE_URL=https://api.openai.com/v1
+OPENAI_COMPATIBLE_MODEL=gpt-4o-mini
+OPENAI_COMPATIBLE_API_KEY=
+COMFYUI_BASE_URL=
+COMFYUI_API_KEY=
+REPLICATE_BASE_URL=https://api.replicate.com/v1
+REPLICATE_API_TOKEN=
+```
+
+## 产品能力
+
+积分系统支持余额查询、任务开始前预扣、成功确认扣费、失败或取消退款。`credit_accounts` 和 `credit_ledger` 在同一事务内更新，`credit_ledger` 对 `reference_type + reference_id + type` 建唯一索引，重复 worker 执行或重复回调不会重复扣费。
+
+API 层支持 Redis 固定窗口限流：IP 级 `RATE_LIMIT_IP_PER_MINUTE`、用户级 `RATE_LIMIT_USER_PER_MINUTE`，生成任务创建前会检查 `TASK_CONCURRENT_LIMIT` 用户并发任务数。敏感写操作会落 `audit_logs`。
+
+作品发布先进入审核队列，`moderation_records.status` 只允许 `pending`、`approved`、`rejected`。管理员审核通过后才将作品置为 `published` 并发布 `work_published` 事件，审核拒绝会将作品置为 `rejected`。
+
+## 素材与合成
+
+素材元数据落库到 `assets`，对象文件存储在 MinIO/S3。素材记录包含 `mime_type`、`size_bytes`、`duration_ms`、`width`、`height`、`checksum`、`storage_bucket`、`storage_key` 等字段。
+
+上传流程先调用 `POST /api/assets/upload-url` 创建素材占位记录并返回 15 分钟有效的 PUT 预签名 URL。合成流程通过 `POST /api/projects/:id/compose` 创建 `compose` 类型任务，由 worker 使用 FFmpeg 下载多张图片、生成 MP4、抽取封面，并可上传 SRT/VTT 字幕占位文件。合成产物会写入视频、封面、字幕素材记录，并通过 outbox 写入 `asset.events` / `asset_created` 和 `generation.task.events` / `task_succeeded`。
 
 ## 快速开始
 
@@ -123,7 +268,7 @@ Outbox Relay 指标暴露在 `http://localhost:19090/metrics`：
 # 复制环境变量
 cp .env.example .env
 
-# 启动所有服务 (PostgreSQL, Redis, Kafka, MinIO, API, Worker, Outbox Relay)
+# 启动所有服务 (PostgreSQL, Redis, Kafka, MinIO, API, Worker, Outbox Relay, Consumers)
 make dev
 
 # 或只启动基础设施，本地运行 API
@@ -131,6 +276,26 @@ make dev-infra
 make migrate
 go run ./cmd/api
 ```
+
+本地常用登录账号：
+
+| 用户 | 邮箱 | 密码 |
+|---|---|---|
+| Admin | `admin@openstory.local` | `changeme123` |
+| Demo | `demo@openstory.local` | `demo123456` |
+
+本地开发建议流程：
+
+```bash
+make dev-infra
+make migrate
+go run ./cmd/api
+go run ./cmd/worker
+go run ./cmd/outbox-relay
+CONSUMER_NAME=analytics-consumer go run ./cmd/consumer
+```
+
+如需同时本地启动多个 Go 进程，给每个进程设置不同 `OBSERVABILITY_ADDR`，避免诊断端口冲突。
 
 ### 验证
 
@@ -164,6 +329,7 @@ make build         # 构建二进制
 | POST | `/api/auth/login` | — | 登录 (返回 JWT access + refresh token) |
 | POST | `/api/auth/refresh` | — | 刷新 token |
 | GET | `/api/me` | ✅ | 当前用户信息 |
+| GET | `/api/credits/balance` | ✅ | 查询积分余额 |
 | POST | `/api/projects` | ✅ | 创建项目 |
 | GET | `/api/projects` | ✅ | 项目列表 (分页) |
 | GET | `/api/projects/:id` | ✅ | 项目详情 |
@@ -178,7 +344,14 @@ make build         # 构建二进制
 | POST | `/api/generation/tasks/:id/cancel` | ✅ | 取消任务 |
 | GET | `/api/generation/tasks/:id/events` | ✅ | 任务状态事件 |
 | GET | `/api/projects/:id/tasks` | ✅ | 项目任务列表 (分页) |
-| POST | `/api/works/:id/publish` | ✅ | 发布作品 |
+| POST | `/api/assets/upload-url` | ✅ | 创建素材记录并返回 MinIO/S3 预签名上传 URL |
+| GET | `/api/assets/:id` | ✅ | 获取素材详情 |
+| GET | `/api/projects/:id/assets` | ✅ | 获取项目素材列表 |
+| POST | `/api/projects/:id/compose` | ✅ | 创建 FFmpeg 多图片合成 MP4 任务 |
+| GET | `/api/compose/:taskId` | ✅ | 获取合成任务状态和输出 |
+| POST | `/api/works/:id/publish` | ✅ | 提交作品进入审核 |
+| GET | `/api/admin/moderation` | ✅ admin | 审核记录列表 |
+| POST | `/api/admin/works/:id/review` | ✅ admin | 管理员审核作品 |
 | GET | `/api/feed` | — | 公开动态流 (分页) |
 
 ## 端口映射
@@ -186,10 +359,17 @@ make build         # 构建二进制
 | 服务 | 端口 |
 |---|---|
 | API | `18080` |
+| API Metrics / pprof | `19094` |
+| Worker Metrics / pprof | `19095` |
 | PostgreSQL | `15432` |
 | Redis | `16379` |
 | Kafka | `19092` |
-| Outbox Relay Metrics | `19090` |
+| Outbox Relay Metrics / pprof | `19090` |
+| Analytics Consumer Metrics / pprof | `19091` |
+| Notification Consumer Metrics / pprof | `19096` |
+| Feed Consumer Metrics / pprof | `19097` |
+| Moderation Consumer Metrics / pprof | `19098` |
+| Audit Consumer Metrics / pprof | `19099` |
 | MinIO API | `19000` |
 | MinIO Console | `19001` |
 

@@ -4,6 +4,7 @@ package outbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -14,8 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/Incipe-win/OpenStory/internal/eventbus"
+	"github.com/Incipe-win/OpenStory/internal/observability"
 )
 
 // ── Prometheus Metrics ──────────────────────────────
@@ -162,8 +166,20 @@ func (r *Relay) poll(ctx context.Context) error {
 }
 
 func (r *Relay) publishOne(ctx context.Context, row outboxRow) error {
+	var event eventbus.Event
+	_ = json.Unmarshal(row.PayloadJSON, &event)
+	ctx = observability.ContextWithIDs(ctx, event.RequestID, firstNonEmpty(row.TraceID, event.TraceID))
+	ctx = observability.ContextWithTraceParent(ctx, event.TraceParent)
+	ctx = observability.ContextWithTraceParentHeader(ctx, event.TraceParent)
+	ctx, span := otel.Tracer("openstory/outbox").Start(ctx, "outbox.publish")
+	defer span.End()
 	// Extract topic from event_type (e.g., "generation.task.events.task_created" → "generation.task.events")
 	topic := extractTopic(row.EventType)
+	span.SetAttributes(
+		attribute.String("outbox.event_type", row.EventType),
+		attribute.String("messaging.destination", topic),
+		attribute.String("outbox.id", fmt.Sprint(row.ID)),
+	)
 
 	start := time.Now()
 
@@ -197,10 +213,21 @@ func (r *Relay) publishOne(ctx context.Context, row outboxRow) error {
 	r.log.Debug().
 		Int64("id", row.ID).
 		Str("topic", topic).
+		Str("request_id", event.RequestID).
+		Str("trace_id", firstNonEmpty(row.TraceID, event.TraceID)).
 		Float64("latency_ms", elapsed*1000).
 		Msg("outbox event published")
 
 	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // extractTopic extracts the Kafka topic from a fully qualified event type.

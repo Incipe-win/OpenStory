@@ -18,7 +18,7 @@ func testLogger() zerolog.Logger {
 	return zerolog.Nop()
 }
 
-func TestProcessorPublishesOutboxEventsAndSpendsCredits(t *testing.T) {
+func TestProcessorPublishesOutboxEventsAndConfirmsCredits(t *testing.T) {
 	ctx := context.Background()
 	taskID := uuid.New()
 	userID := uuid.New()
@@ -41,7 +41,7 @@ func TestProcessorPublishesOutboxEventsAndSpendsCredits(t *testing.T) {
 	registry := provider.NewRegistry()
 	registry.Register(fakeProvider{})
 
-	processor := NewProcessor(repo, registry, outbox, billingSvc, testLogger())
+	processor := NewProcessor(repo, registry, outbox, billingSvc, nil, 2, testLogger())
 	asynqTask, err := NewAsynqTask(taskID)
 	if err != nil {
 		t.Fatalf("NewAsynqTask returned error: %v", err)
@@ -57,8 +57,8 @@ func TestProcessorPublishesOutboxEventsAndSpendsCredits(t *testing.T) {
 	if repo.costCredits != 7 {
 		t.Fatalf("expected cost 7, got %d", repo.costCredits)
 	}
-	if billingSvc.amount != 7 || billingSvc.referenceID != taskID {
-		t.Fatalf("unexpected billing call: amount=%d reference=%s", billingSvc.amount, billingSvc.referenceID)
+	if billingSvc.reserved != EstimateCostCredits(TypeScript) || billingSvc.confirmed != 7 || billingSvc.referenceID != taskID {
+		t.Fatalf("unexpected billing calls: reserved=%d confirmed=%d reference=%s", billingSvc.reserved, billingSvc.confirmed, billingSvc.referenceID)
 	}
 	assertEventTypes(t, outbox.events, []string{"task_started", "task_succeeded"})
 }
@@ -79,7 +79,7 @@ func TestProcessorPublishesFailedEventForUnknownProvider(t *testing.T) {
 	}
 	outbox := &fakeOutbox{}
 
-	processor := NewProcessor(repo, provider.NewRegistry(), outbox, nil, testLogger())
+	processor := NewProcessor(repo, provider.NewRegistry(), outbox, nil, nil, 2, testLogger())
 	asynqTask, err := NewAsynqTask(taskID)
 	if err != nil {
 		t.Fatalf("NewAsynqTask returned error: %v", err)
@@ -127,6 +127,7 @@ func (f *fakeRepo) GetByIdempotencyKey(context.Context, string) (*GenerationTask
 func (f *fakeRepo) ListByProject(context.Context, uuid.UUID, int, int) ([]GenerationTask, int, error) {
 	return nil, 0, nil
 }
+func (f *fakeRepo) CountActiveByUser(context.Context, uuid.UUID) (int, error) { return 0, nil }
 func (f *fakeRepo) UpdateStatus(_ context.Context, _ uuid.UUID, status string, _ *json.RawMessage, _ *string) error {
 	f.statuses = append(f.statuses, status)
 	f.task.Status = status
@@ -163,15 +164,20 @@ func (f *fakeOutbox) Publish(_ context.Context, _ string, event eventbus.Event) 
 }
 
 type fakeBilling struct {
-	amount      int
+	reserved    int
+	confirmed   int
+	refunded    bool
 	referenceID uuid.UUID
 }
 
-func (f *fakeBilling) Spend(_ context.Context, userID uuid.UUID, amount int, referenceType string, referenceID uuid.UUID, description string) (*billing.LedgerEntry, error) {
+func (f *fakeBilling) GetAccount(context.Context, uuid.UUID) (*billing.Account, error) {
+	return nil, nil
+}
+func (f *fakeBilling) Reserve(_ context.Context, userID uuid.UUID, amount int, referenceType string, referenceID uuid.UUID, description string) (*billing.LedgerEntry, error) {
 	if referenceType != "generation_task" {
 		return nil, errors.New("unexpected reference type")
 	}
-	f.amount = amount
+	f.reserved = amount
 	f.referenceID = referenceID
 	return &billing.LedgerEntry{
 		ID:            uuid.New(),
@@ -182,14 +188,33 @@ func (f *fakeBilling) Spend(_ context.Context, userID uuid.UUID, amount int, ref
 		Description:   description,
 	}, nil
 }
+func (f *fakeBilling) Confirm(_ context.Context, userID uuid.UUID, amount int, referenceType string, referenceID uuid.UUID, description string) (*billing.LedgerEntry, error) {
+	f.confirmed = amount
+	f.referenceID = referenceID
+	return &billing.LedgerEntry{ID: uuid.New(), UserID: userID, Type: billing.TypeConfirm, Amount: 0, ReferenceType: referenceType, ReferenceID: referenceID}, nil
+}
+func (f *fakeBilling) Refund(_ context.Context, userID uuid.UUID, referenceType string, referenceID uuid.UUID, description string) (*billing.LedgerEntry, error) {
+	f.refunded = true
+	f.referenceID = referenceID
+	return &billing.LedgerEntry{ID: uuid.New(), UserID: userID, Type: billing.TypeRefund, ReferenceType: referenceType, ReferenceID: referenceID}, nil
+}
+func (f *fakeBilling) Spend(ctx context.Context, userID uuid.UUID, amount int, referenceType string, referenceID uuid.UUID, description string) (*billing.LedgerEntry, error) {
+	if _, err := f.Reserve(ctx, userID, amount, referenceType, referenceID, description); err != nil {
+		return nil, err
+	}
+	return f.Confirm(ctx, userID, amount, referenceType, referenceID, description)
+}
 
 type fakeProvider struct{}
 
-func (fakeProvider) Name() string         { return "fake" }
-func (fakeProvider) Supports(string) bool { return true }
-func (fakeProvider) Generate(context.Context, provider.Request) (*provider.Result, error) {
-	return &provider.Result{
-		Output:      json.RawMessage(`{"ok":true}`),
+func (fakeProvider) Name() string { return "fake" }
+func (fakeProvider) Capabilities() []provider.Capability {
+	return []provider.Capability{provider.CapabilityTextGenerate}
+}
+func (fakeProvider) TextGenerate(context.Context, provider.TextRequest) (*provider.TextResult, error) {
+	return &provider.TextResult{
+		Output:      provider.StructuredFallback(provider.TaskScript, json.RawMessage(`{"prompt":"test"}`)),
 		CostCredits: 7,
+		Model:       "fake-text",
 	}, nil
 }

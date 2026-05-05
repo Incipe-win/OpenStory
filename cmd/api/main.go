@@ -32,6 +32,18 @@ func main() {
 		Str("env", cfg.Server.Env).
 		Str("version", cfg.Server.Version).
 		Msg("starting OpenStory API")
+	traceShutdown, err := observability.InitTracer(context.Background(), observability.TraceConfig{
+		ServiceName:  cfg.Observability.ServiceName + "-api",
+		Enabled:      cfg.Observability.TracingEnabled,
+		OTLPEndpoint: cfg.Observability.OTLPEndpoint,
+		OTLPInsecure: cfg.Observability.OTLPInsecure,
+	})
+	if err != nil {
+		log.Warn().Err(err).Msg("OpenTelemetry tracing disabled")
+		traceShutdown = func(context.Context) error { return nil }
+	}
+	defer traceShutdown(context.Background()) //nolint:errcheck
+	diagSrv := observability.StartDiagnosticsServer(cfg.Observability.DiagnosticsAddr, log)
 
 	// ── Database ─────────────────────────────────────
 	ctx := context.Background()
@@ -100,6 +112,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("server forced to shutdown")
 	}
+	observability.ShutdownDiagnostics(shutdownCtx, diagSrv)
 
 	log.Info().Msg("server stopped")
 }

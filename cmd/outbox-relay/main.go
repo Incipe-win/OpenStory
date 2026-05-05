@@ -3,13 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/Incipe-win/OpenStory/internal/config"
 	"github.com/Incipe-win/OpenStory/internal/db"
@@ -27,6 +24,17 @@ func main() {
 
 	log := observability.NewLogger(cfg.Server.Env)
 	log.Info().Msg("starting OpenStory outbox-relay")
+	traceShutdown, err := observability.InitTracer(context.Background(), observability.TraceConfig{
+		ServiceName:  cfg.Observability.ServiceName + "-outbox-relay",
+		Enabled:      cfg.Observability.TracingEnabled,
+		OTLPEndpoint: cfg.Observability.OTLPEndpoint,
+		OTLPInsecure: cfg.Observability.OTLPInsecure,
+	})
+	if err != nil {
+		log.Warn().Err(err).Msg("OpenTelemetry tracing disabled")
+		traceShutdown = func(context.Context) error { return nil }
+	}
+	defer traceShutdown(context.Background()) //nolint:errcheck
 
 	// ── Database ─────────────────────────────────────
 	ctx, cancel := context.WithCancel(context.Background())
@@ -47,19 +55,7 @@ func main() {
 	// Ensure topics exist
 	outbox.EnsureTopics(cfg.Kafka.Brokers, log)
 
-	// ── Prometheus metrics ───────────────────────────
-	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		srv := &http.Server{
-			Addr:    ":9090",
-			Handler: mux,
-		}
-		log.Info().Msg("prometheus metrics on :9090/metrics")
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Error().Err(err).Msg("metrics server error")
-		}
-	}()
+	diagSrv := observability.StartDiagnosticsServer(cfg.Observability.DiagnosticsAddr, log)
 
 	// ── Relay ────────────────────────────────────────
 	relay := outbox.NewRelay(pool, publisher, log)
@@ -77,6 +73,7 @@ func main() {
 
 	log.Info().Msg("shutting down outbox-relay...")
 	cancel()
+	observability.ShutdownDiagnostics(context.Background(), diagSrv)
 	time.Sleep(500 * time.Millisecond) // allow in-flight to complete
 	log.Info().Msg("outbox-relay stopped")
 }

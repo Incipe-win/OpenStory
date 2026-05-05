@@ -22,6 +22,7 @@ type Repository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*GenerationTask, error)
 	GetByIdempotencyKey(ctx context.Context, key string) (*GenerationTask, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID, page, pageSize int) ([]GenerationTask, int, error)
+	CountActiveByUser(ctx context.Context, userID uuid.UUID) (int, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string, output *json.RawMessage, errMsg *string) error
 	UpdateCost(ctx context.Context, id uuid.UUID, costCredits int) error
 	SetRunning(ctx context.Context, id uuid.UUID) error
@@ -124,6 +125,18 @@ func (r *PgRepository) ListByProject(ctx context.Context, projectID uuid.UUID, p
 		tasks = append(tasks, t)
 	}
 	return tasks, total, nil
+}
+
+func (r *PgRepository) CountActiveByUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM generation_tasks
+		 WHERE user_id = $1 AND status IN ('pending', 'queued', 'running')`,
+		userID,
+	).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count active tasks: %w", err)
+	}
+	return total, nil
 }
 
 func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string, output *json.RawMessage, errMsg *string) error {

@@ -26,17 +26,46 @@ func IsTerminal(status string) bool {
 // ── Task Types (maps to workflow node types) ────────
 
 const (
-	TypeScript          = "script"
-	TypeCharacter       = "character"
-	TypeScene           = "scene"
-	TypeStoryboard      = "storyboard"
-	TypeImagePrompt     = "image_prompt"
-	TypeImageGeneration = "image_generation"
-	TypeVideoGeneration = "video_generation"
-	TypeAudio           = "audio"
-	TypeSubtitle        = "subtitle"
-	TypeCompose         = "compose"
+	TypeIdea             = "idea"
+	TypeScript           = "script"
+	TypeCharacter        = "character"
+	TypeCharacters       = "characters"
+	TypeScene            = "scene"
+	TypeStoryboard       = "storyboard"
+	TypeImagePrompt      = "image_prompt"
+	TypeVideoPrompt      = "video_prompt"
+	TypeCreativePipeline = "creative_pipeline"
+	TypeImageGeneration  = "image_generation"
+	TypeVideoGeneration  = "video_generation"
+	TypeAudio            = "audio"
+	TypeSubtitle         = "subtitle"
+	TypeCompose          = "compose"
 )
+
+// EstimateCostCredits returns the credits reserved before a task starts.
+// Providers may report a lower final cost; unused reserved credits are refunded.
+func EstimateCostCredits(taskType string) int {
+	costs := map[string]int{
+		TypeIdea:             1,
+		TypeScript:           2,
+		TypeCharacter:        1,
+		TypeCharacters:       1,
+		TypeScene:            1,
+		TypeStoryboard:       2,
+		TypeImagePrompt:      1,
+		TypeVideoPrompt:      1,
+		TypeCreativePipeline: 5,
+		TypeImageGeneration:  5,
+		TypeVideoGeneration:  10,
+		TypeAudio:            3,
+		TypeSubtitle:         1,
+		TypeCompose:          5,
+	}
+	if cost, ok := costs[taskType]; ok {
+		return cost
+	}
+	return 1
+}
 
 // ── Models ──────────────────────────────────────────
 

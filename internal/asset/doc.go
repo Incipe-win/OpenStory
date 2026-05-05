@@ -4,14 +4,18 @@ package asset
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Incipe-win/OpenStory/internal/eventbus"
 )
+
+var ErrAssetNotFound = errors.New("asset not found")
 
 // Asset represents a stored media asset.
 type Asset struct {
@@ -22,6 +26,10 @@ type Asset struct {
 	Name          string          `json:"name"`
 	MimeType      string          `json:"mime_type"`
 	SizeBytes     int64           `json:"size_bytes"`
+	DurationMs    *int            `json:"duration_ms,omitempty"`
+	Width         *int            `json:"width,omitempty"`
+	Height        *int            `json:"height,omitempty"`
+	Checksum      string          `json:"checksum"`
 	StorageKey    string          `json:"storage_key"`
 	StorageBucket string          `json:"storage_bucket"`
 	URL           string          `json:"url"`
@@ -43,6 +51,9 @@ func NewCreator(pool *pgxpool.Pool, outbox *eventbus.OutboxWriter) *Creator {
 
 // Create inserts an asset metadata row and appends an asset_created event atomically.
 func (c *Creator) Create(ctx context.Context, a *Asset) error {
+	if a.ID == uuid.Nil {
+		a.ID = uuid.New()
+	}
 	if a.MetadataJSON == nil {
 		a.MetadataJSON = json.RawMessage(`{}`)
 	}
@@ -58,11 +69,12 @@ func (c *Creator) Create(ctx context.Context, a *Asset) error {
 
 	if err := tx.QueryRow(ctx,
 		`INSERT INTO assets
-			(user_id, project_id, type, name, mime_type, size_bytes, storage_key, storage_bucket, url, thumbnail_url, metadata_json)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			(id, user_id, project_id, type, name, mime_type, size_bytes, duration_ms, width, height,
+			 checksum, storage_key, storage_bucket, url, thumbnail_url, metadata_json)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		 RETURNING id, created_at`,
-		a.UserID, a.ProjectID, a.Type, a.Name, a.MimeType, a.SizeBytes, a.StorageKey,
-		a.StorageBucket, a.URL, a.ThumbnailURL, a.MetadataJSON,
+		a.ID, a.UserID, a.ProjectID, a.Type, a.Name, a.MimeType, a.SizeBytes, a.DurationMs,
+		a.Width, a.Height, a.Checksum, a.StorageKey, a.StorageBucket, a.URL, a.ThumbnailURL, a.MetadataJSON,
 	).Scan(&a.ID, &a.CreatedAt); err != nil {
 		return fmt.Errorf("insert asset: %w", err)
 	}
@@ -75,6 +87,10 @@ func (c *Creator) Create(ctx context.Context, a *Asset) error {
 				"name":           a.Name,
 				"mime_type":      a.MimeType,
 				"size_bytes":     a.SizeBytes,
+				"duration_ms":    a.DurationMs,
+				"width":          a.Width,
+				"height":         a.Height,
+				"checksum":       a.Checksum,
 				"storage_bucket": a.StorageBucket,
 				"storage_key":    a.StorageKey,
 			}).WithUser(a.UserID)); err != nil {
@@ -86,4 +102,57 @@ func (c *Creator) Create(ctx context.Context, a *Asset) error {
 		return fmt.Errorf("commit asset create tx: %w", err)
 	}
 	return nil
+}
+
+func (c *Creator) Get(ctx context.Context, id uuid.UUID) (*Asset, error) {
+	return scanAsset(c.pool.QueryRow(ctx,
+		`SELECT id, user_id, project_id, type, name, mime_type, size_bytes, duration_ms, width, height,
+		        checksum, storage_key, storage_bucket, url, thumbnail_url, metadata_json, created_at
+		 FROM assets WHERE id = $1`, id))
+}
+
+func (c *Creator) ListByProject(ctx context.Context, projectID uuid.UUID, page, pageSize int) ([]Asset, int, error) {
+	var total int
+	if err := c.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM assets WHERE project_id = $1`, projectID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count assets: %w", err)
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := c.pool.Query(ctx,
+		`SELECT id, user_id, project_id, type, name, mime_type, size_bytes, duration_ms, width, height,
+		        checksum, storage_key, storage_bucket, url, thumbnail_url, metadata_json, created_at
+		 FROM assets WHERE project_id = $1
+		 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+		projectID, pageSize, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list assets: %w", err)
+	}
+	defer rows.Close()
+
+	var assets []Asset
+	for rows.Next() {
+		a, err := scanAsset(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		assets = append(assets, *a)
+	}
+	return assets, total, nil
+}
+
+func scanAsset(row pgx.Row) (*Asset, error) {
+	var a Asset
+	err := row.Scan(&a.ID, &a.UserID, &a.ProjectID, &a.Type, &a.Name, &a.MimeType,
+		&a.SizeBytes, &a.DurationMs, &a.Width, &a.Height, &a.Checksum,
+		&a.StorageKey, &a.StorageBucket, &a.URL, &a.ThumbnailURL, &a.MetadataJSON, &a.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrAssetNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan asset: %w", err)
+	}
+	return &a, nil
 }

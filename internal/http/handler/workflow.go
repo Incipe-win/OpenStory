@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/gin-gonic/gin"
@@ -100,12 +101,12 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 // ── Update ──────────────────────────────────────────
 
 type nodeInput struct {
-	ID         uuid.UUID `json:"id"   binding:"required"`
-	Type       string    `json:"type" binding:"required"`
-	Name       string    `json:"name"`
-	Config     any       `json:"config"`
-	PositionX  float64   `json:"position_x"`
-	PositionY  float64   `json:"position_y"`
+	ID        uuid.UUID `json:"id"   binding:"required"`
+	Type      string    `json:"type" binding:"required"`
+	Name      string    `json:"name"`
+	Config    any       `json:"config"`
+	PositionX float64   `json:"position_x"`
+	PositionY float64   `json:"position_y"`
 }
 
 type edgeInput struct {
@@ -153,7 +154,12 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 			PositionY: n.PositionY,
 		}
 		if n.Config != nil {
-			// ConfigJSON will be set as default {} in repository if nil
+			configJSON, err := json.Marshal(n.Config)
+			if err != nil {
+				BadRequest(c, "invalid node config")
+				return
+			}
+			nodes[i].ConfigJSON = configJSON
 		}
 	}
 
@@ -248,10 +254,10 @@ func (h *WorkflowHandler) Validate(c *gin.Context) {
 
 	if err := workflow.ValidateDAG(detail.Nodes, detail.Edges); err != nil {
 		OK(c, gin.H{
-			"valid":   false,
-			"error":   err.Error(),
-			"nodes":   len(detail.Nodes),
-			"edges":   len(detail.Edges),
+			"valid": false,
+			"error": err.Error(),
+			"nodes": len(detail.Nodes),
+			"edges": len(detail.Edges),
 		})
 		return
 	}
@@ -263,11 +269,11 @@ func (h *WorkflowHandler) Validate(c *gin.Context) {
 	}
 
 	OK(c, gin.H{
-		"valid":            true,
-		"nodes":            len(detail.Nodes),
-		"edges":            len(detail.Edges),
-		"execution_order":  order,
-		"node_schemas":     workflow.NodeSchemas,
+		"valid":           true,
+		"nodes":           len(detail.Nodes),
+		"edges":           len(detail.Edges),
+		"execution_order": order,
+		"node_schemas":    workflow.NodeSchemas,
 	})
 }
 

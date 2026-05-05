@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/Incipe-win/OpenStory/internal/observability"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -23,6 +24,7 @@ func NewOutboxWriter(pool *pgxpool.Pool) *OutboxWriter {
 
 // Publish writes an event to the outbox_events table.
 func (w *OutboxWriter) Publish(ctx context.Context, topic string, event Event) error {
+	event = enrichEventFromContext(ctx, event)
 	payloadJSON, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
@@ -48,6 +50,7 @@ func (w *OutboxWriter) Publish(ctx context.Context, topic string, event Event) e
 // PublishTx writes an event inside an existing transaction, enabling
 // atomic writes with the business data.
 func (w *OutboxWriter) PublishTx(ctx context.Context, tx pgx.Tx, topic string, event Event) error {
+	event = enrichEventFromContext(ctx, event)
 	payloadJSON, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
@@ -68,4 +71,17 @@ func (w *OutboxWriter) PublishTx(ctx context.Context, tx pgx.Tx, topic string, e
 		return fmt.Errorf("insert outbox event in tx: %w", err)
 	}
 	return nil
+}
+
+func enrichEventFromContext(ctx context.Context, event Event) Event {
+	if event.RequestID == "" {
+		event.RequestID = observability.RequestIDFromContext(ctx)
+	}
+	if event.TraceID == "" {
+		event.TraceID = observability.TraceIDFromContext(ctx)
+	}
+	if event.TraceParent == "" {
+		event.TraceParent = observability.TraceParentFromContext(ctx)
+	}
+	return event
 }

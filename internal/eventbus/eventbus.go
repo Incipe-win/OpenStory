@@ -18,6 +18,7 @@ const (
 	TopicModerationEvents     = "moderation.events"
 	TopicAuditEvents          = "audit.events"
 	TopicNotificationEvents   = "notification.events"
+	TopicDLQEvents            = "openstory.dlq"
 )
 
 // AllTopics lists all Kafka topics to auto-create.
@@ -29,6 +30,7 @@ var AllTopics = []string{
 	TopicModerationEvents,
 	TopicAuditEvents,
 	TopicNotificationEvents,
+	TopicDLQEvents,
 }
 
 // ── Event Envelope ──────────────────────────────────
@@ -47,6 +49,8 @@ const EnvelopeJSONSchema = `{
     "aggregate_type": {"type": "string"},
     "aggregate_id": {"type": "string", "format": "uuid"},
     "user_id": {"type": "string", "format": "uuid"},
+    "request_id": {"type": "string"},
+    "traceparent": {"type": "string"},
     "trace_id": {"type": "string"},
     "schema_version": {"type": "integer", "minimum": 1},
     "occurred_at": {"type": "string", "format": "date-time"},
@@ -61,6 +65,8 @@ type Event struct {
 	AggregateType string    `json:"aggregate_type"`
 	AggregateID   uuid.UUID `json:"aggregate_id"`
 	UserID        uuid.UUID `json:"user_id,omitempty"`
+	RequestID     string    `json:"request_id,omitempty"`
+	TraceParent   string    `json:"traceparent,omitempty"`
 	TraceID       string    `json:"trace_id,omitempty"`
 	SchemaVersion int       `json:"schema_version"`
 	OccurredAt    time.Time `json:"occurred_at"`

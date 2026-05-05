@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/Incipe-win/OpenStory/internal/audit"
+	"github.com/Incipe-win/OpenStory/internal/billing"
 	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/task"
@@ -21,12 +22,14 @@ type TaskHandler struct {
 	repo        task.Repository
 	asynqClient *asynq.Client
 	auditLog    *audit.Logger
+	billing     billing.Service
 	outbox      eventbus.EventBus
+	taskLimit   int
 	log         zerolog.Logger
 }
 
-func NewTaskHandler(repo task.Repository, asynqClient *asynq.Client, auditLog *audit.Logger, outbox eventbus.EventBus, log zerolog.Logger) *TaskHandler {
-	return &TaskHandler{repo: repo, asynqClient: asynqClient, auditLog: auditLog, outbox: outbox, log: log}
+func NewTaskHandler(repo task.Repository, asynqClient *asynq.Client, auditLog *audit.Logger, billingSvc billing.Service, outbox eventbus.EventBus, taskLimit int, log zerolog.Logger) *TaskHandler {
+	return &TaskHandler{repo: repo, asynqClient: asynqClient, auditLog: auditLog, billing: billingSvc, outbox: outbox, taskLimit: taskLimit, log: log}
 }
 
 // ── Create ──────────────────────────────────────────
@@ -60,6 +63,19 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	if err == nil {
 		OK(c, existing)
 		return
+	}
+
+	if h.taskLimit > 0 {
+		active, err := h.repo.CountActiveByUser(c.Request.Context(), userID)
+		if err != nil {
+			h.log.Error().Err(err).Msg("failed to count active tasks")
+			InternalError(c, "internal error")
+			return
+		}
+		if active >= h.taskLimit {
+			TooManyRequests(c, "task concurrency limit exceeded")
+			return
+		}
 	}
 
 	t := &task.GenerationTask{
@@ -103,7 +119,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	})
 
 	// Enqueue Asynq job
-	asynqTask, err := task.NewAsynqTask(t.ID)
+	asynqTask, err := task.NewAsynqTaskWithContext(c.Request.Context(), t.ID)
 	if err != nil {
 		h.log.Error().Err(err).Msg("failed to create asynq task")
 		InternalError(c, "internal error")
@@ -239,6 +255,13 @@ func (h *TaskHandler) Cancel(c *gin.Context) {
 	_ = h.repo.AddEvent(c.Request.Context(), id, task.EventCanceled, map[string]any{
 		"canceled_by": userID,
 	})
+	if h.billing != nil {
+		if _, err := h.billing.Refund(c.Request.Context(), userID, "generation_task", id, "Task canceled"); err != nil &&
+			!errors.Is(err, billing.ErrReservationNotFound) &&
+			!errors.Is(err, billing.ErrReservationConfirmed) {
+			h.log.Warn().Err(err).Str("task_id", id.String()).Msg("failed to refund canceled task")
+		}
+	}
 
 	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
 		UserID: &userID, Action: "cancel_task", ResourceType: "generation_task", ResourceID: &id,
