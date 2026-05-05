@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hibiken/asynq"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Incipe-win/OpenStory/internal/config"
@@ -54,12 +55,22 @@ func main() {
 		log.Info().Msg("redis connected")
 	}
 
+	// ── Asynq Client ─────────────────────────────────
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	defer asynqClient.Close()
+	log.Info().Msg("asynq client initialized")
+
 	// ── HTTP Server ──────────────────────────────────
 	r := router.New(router.Deps{
-		Log:    log,
-		Pool:   pool,
-		RDB:    rdb,
-		Config: cfg,
+		Log:         log,
+		Pool:        pool,
+		RDB:         rdb,
+		Config:      cfg,
+		AsynqClient: asynqClient,
 	})
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),

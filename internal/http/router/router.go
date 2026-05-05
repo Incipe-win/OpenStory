@@ -3,6 +3,7 @@ package router
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
@@ -13,15 +14,17 @@ import (
 	"github.com/Incipe-win/OpenStory/internal/http/handler"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/project"
+	"github.com/Incipe-win/OpenStory/internal/task"
 	"github.com/Incipe-win/OpenStory/internal/workflow"
 )
 
 // Deps holds all dependencies needed to build the router.
 type Deps struct {
-	Log     zerolog.Logger
-	Pool    *pgxpool.Pool
-	RDB     *redis.Client
-	Config  *config.Config
+	Log         zerolog.Logger
+	Pool        *pgxpool.Pool
+	RDB         *redis.Client
+	Config      *config.Config
+	AsynqClient *asynq.Client
 }
 
 // New creates and configures a new Gin engine with all routes registered.
@@ -49,11 +52,13 @@ func New(deps Deps) *gin.Engine {
 	authRepo := authpkg.NewPgRepository(deps.Pool)
 	projRepo := project.NewPgRepository(deps.Pool)
 	wfRepo := workflow.NewPgRepository(deps.Pool)
+	taskRepo := task.NewPgRepository(deps.Pool)
 
 	// ── Handlers ─────────────────────────────────────
 	authH := handler.NewAuthHandler(authRepo, jwtSvc, auditLog, deps.Log)
 	projH := handler.NewProjectHandler(projRepo, auditLog, deps.Log)
 	wfH := handler.NewWorkflowHandler(wfRepo, auditLog, deps.Log)
+	taskH := handler.NewTaskHandler(taskRepo, deps.AsynqClient, auditLog, deps.Log)
 
 	// ── Public routes ────────────────────────────────
 	api := r.Group("/api")
@@ -82,6 +87,7 @@ func New(deps Deps) *gin.Engine {
 			projects.GET("/:id", projH.Get)
 			projects.PATCH("/:id", projH.Update)
 			projects.POST("/:id/workflows", wfH.Create)
+			projects.GET("/:id/tasks", taskH.ListByProject)
 		}
 
 		workflows := authed.Group("/workflows")
@@ -90,6 +96,14 @@ func New(deps Deps) *gin.Engine {
 			workflows.PUT("/:id", wfH.Update)
 			workflows.POST("/:id/validate", wfH.Validate)
 			workflows.POST("/:id/snapshot", wfH.Snapshot)
+		}
+
+		generation := authed.Group("/generation/tasks")
+		{
+			generation.POST("", taskH.Create)
+			generation.GET("/:id", taskH.Get)
+			generation.POST("/:id/cancel", taskH.Cancel)
+			generation.GET("/:id/events", taskH.Events)
 		}
 
 		works := authed.Group("/works")

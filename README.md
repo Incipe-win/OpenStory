@@ -132,6 +132,11 @@ make build         # 构建二进制
 | PUT | `/api/workflows/:id` | ✅ | 更新工作流 (DAG 校验) |
 | POST | `/api/workflows/:id/validate` | ✅ | 验证 DAG + 拓扑排序 |
 | POST | `/api/workflows/:id/snapshot` | ✅ | 创建版本快照 |
+| POST | `/api/generation/tasks` | ✅ | 创建生成任务 (Asynq) |
+| GET | `/api/generation/tasks/:id` | ✅ | 任务详情 |
+| POST | `/api/generation/tasks/:id/cancel` | ✅ | 取消任务 |
+| GET | `/api/generation/tasks/:id/events` | ✅ | 任务状态事件 |
+| GET | `/api/projects/:id/tasks` | ✅ | 项目任务列表 (分页) |
 | POST | `/api/works/:id/publish` | ✅ | 发布作品 |
 | GET | `/api/feed` | — | 公开动态流 (分页) |
 
