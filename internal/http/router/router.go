@@ -13,6 +13,7 @@ import (
 	"github.com/Incipe-win/OpenStory/internal/http/handler"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/project"
+	"github.com/Incipe-win/OpenStory/internal/workflow"
 )
 
 // Deps holds all dependencies needed to build the router.
@@ -47,10 +48,12 @@ func New(deps Deps) *gin.Engine {
 	auditLog := audit.NewLogger(deps.Pool)
 	authRepo := authpkg.NewPgRepository(deps.Pool)
 	projRepo := project.NewPgRepository(deps.Pool)
+	wfRepo := workflow.NewPgRepository(deps.Pool)
 
 	// ── Handlers ─────────────────────────────────────
 	authH := handler.NewAuthHandler(authRepo, jwtSvc, auditLog, deps.Log)
 	projH := handler.NewProjectHandler(projRepo, auditLog, deps.Log)
+	wfH := handler.NewWorkflowHandler(wfRepo, auditLog, deps.Log)
 
 	// ── Public routes ────────────────────────────────
 	api := r.Group("/api")
@@ -78,6 +81,15 @@ func New(deps Deps) *gin.Engine {
 			projects.GET("", projH.List)
 			projects.GET("/:id", projH.Get)
 			projects.PATCH("/:id", projH.Update)
+			projects.POST("/:id/workflows", wfH.Create)
+		}
+
+		workflows := authed.Group("/workflows")
+		{
+			workflows.GET("/:id", wfH.Get)
+			workflows.PUT("/:id", wfH.Update)
+			workflows.POST("/:id/validate", wfH.Validate)
+			workflows.POST("/:id/snapshot", wfH.Snapshot)
 		}
 
 		works := authed.Group("/works")

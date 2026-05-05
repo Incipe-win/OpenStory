@@ -127,6 +127,11 @@ make build         # 构建二进制
 | GET | `/api/projects` | ✅ | 项目列表 (分页) |
 | GET | `/api/projects/:id` | ✅ | 项目详情 |
 | PATCH | `/api/projects/:id` | ✅ | 更新项目 |
+| POST | `/api/projects/:id/workflows` | ✅ | 创建工作流 |
+| GET | `/api/workflows/:id` | ✅ | 获取工作流 (含节点和边) |
+| PUT | `/api/workflows/:id` | ✅ | 更新工作流 (DAG 校验) |
+| POST | `/api/workflows/:id/validate` | ✅ | 验证 DAG + 拓扑排序 |
+| POST | `/api/workflows/:id/snapshot` | ✅ | 创建版本快照 |
 | POST | `/api/works/:id/publish` | ✅ | 发布作品 |
 | GET | `/api/feed` | — | 公开动态流 (分页) |
 
