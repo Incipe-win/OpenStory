@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/caarlos0/env/v11"
 )
@@ -14,6 +15,14 @@ type Config struct {
 	Redis    RedisConfig
 	Kafka    KafkaConfig
 	MinIO    MinIOConfig
+	JWT      JWTConfig
+}
+
+// JWTConfig holds JWT token settings.
+type JWTConfig struct {
+	Secret          string        `env:"JWT_SECRET"      envDefault:"openstory-dev-secret-change-in-production"`
+	AccessTokenTTL  time.Duration `env:"JWT_ACCESS_TTL"  envDefault:"15m"`
+	RefreshTokenTTL time.Duration `env:"JWT_REFRESH_TTL" envDefault:"168h"`
 }
 
 // ServerConfig holds HTTP server settings.

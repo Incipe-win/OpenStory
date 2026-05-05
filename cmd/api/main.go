@@ -55,7 +55,12 @@ func main() {
 	}
 
 	// ── HTTP Server ──────────────────────────────────
-	r := router.New(log, pool, rdb, cfg.Server.Version)
+	r := router.New(router.Deps{
+		Log:    log,
+		Pool:   pool,
+		RDB:    rdb,
+		Config: cfg,
+	})
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      r,

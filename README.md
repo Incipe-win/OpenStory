@@ -115,10 +115,20 @@ make build         # 构建二进制
 
 ## API 端点
 
-| Method | Path | 描述 |
-|---|---|---|
-| GET | `/healthz` | 存活探针 |
-| GET | `/readyz` | 就绪探针 (检查 DB + Redis) |
+| Method | Path | Auth | 描述 |
+|---|---|---|---|
+| GET | `/healthz` | — | 存活探针 |
+| GET | `/readyz` | — | 就绪探针 (检查 DB + Redis) |
+| POST | `/api/auth/register` | — | 注册新用户 |
+| POST | `/api/auth/login` | — | 登录 (返回 JWT access + refresh token) |
+| POST | `/api/auth/refresh` | — | 刷新 token |
+| GET | `/api/me` | ✅ | 当前用户信息 |
+| POST | `/api/projects` | ✅ | 创建项目 |
+| GET | `/api/projects` | ✅ | 项目列表 (分页) |
+| GET | `/api/projects/:id` | ✅ | 项目详情 |
+| PATCH | `/api/projects/:id` | ✅ | 更新项目 |
+| POST | `/api/works/:id/publish` | ✅ | 发布作品 |
+| GET | `/api/feed` | — | 公开动态流 (分页) |
 
 ## 端口映射
 
