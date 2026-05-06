@@ -21,6 +21,7 @@ type Repository interface {
 	ListByProject(ctx context.Context, projectID, userID uuid.UUID, page, pageSize int) ([]Workflow, int, error)
 	GetDetail(ctx context.Context, id uuid.UUID) (*WorkflowDetail, error)
 	Update(ctx context.Context, wf *Workflow, nodes []Node, edges []Edge) error
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	CreateSnapshot(ctx context.Context, workflowID, userID uuid.UUID) (*Version, error)
 }
 
@@ -202,6 +203,19 @@ func (r *PgRepository) Update(ctx context.Context, wf *Workflow, nodes []Node, e
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (r *PgRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE workflows SET status = $2 WHERE id = $1`,
+		id, status)
+	if err != nil {
+		return fmt.Errorf("update workflow status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrWorkflowNotFound
+	}
+	return nil
 }
 
 func (r *PgRepository) CreateSnapshot(ctx context.Context, workflowID, userID uuid.UUID) (*Version, error) {

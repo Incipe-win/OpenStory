@@ -50,6 +50,7 @@ export default function WorkspacePage({
         <WorkflowToolbar
           workflowId={workflowId}
           workflowName={data.workflow.name}
+          workflowStatus={data.workflow.status}
         />
       </div>
 

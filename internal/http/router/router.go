@@ -70,7 +70,7 @@ func New(deps Deps) *gin.Engine {
 	// ── Handlers ─────────────────────────────────────
 	authH := handler.NewAuthHandler(authRepo, jwtSvc, auditLog, deps.Log)
 	projH := handler.NewProjectHandler(projRepo, auditLog, outboxWriter, deps.Log, jwtSvc)
-	wfH := handler.NewWorkflowHandler(wfRepo, projRepo, auditLog, deps.Log)
+	wfH := handler.NewWorkflowHandler(wfRepo, projRepo, taskRepo, deps.AsynqClient, auditLog, outboxWriter, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	taskH := handler.NewTaskHandler(taskRepo, deps.AsynqClient, auditLog, billingSvc, outboxWriter, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	assetH := handler.NewAssetHandler(assetRepo, assetStorage, projRepo, taskRepo, deps.AsynqClient, auditLog, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	billingH := handler.NewBillingHandler(billingSvc, deps.Log)
@@ -130,6 +130,7 @@ func New(deps Deps) *gin.Engine {
 			workflows.PUT("/:id", wfH.Update)
 			workflows.POST("/:id/validate", wfH.Validate)
 			workflows.POST("/:id/snapshot", wfH.Snapshot)
+			workflows.POST("/:id/run", wfH.Run)
 		}
 
 		generation := authed.Group("/generation/tasks")

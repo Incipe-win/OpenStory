@@ -52,6 +52,7 @@ function PropertyEditor({
   const [configJson, setConfigJson] = useState(() =>
     JSON.stringify(node.config, null, 2)
   );
+  const [message, setMessage] = useState<string | null>(null);
   const def = getNodeDef(node.type);
   const Icon = def.icon;
 
@@ -59,8 +60,9 @@ function PropertyEditor({
     try {
       const config = JSON.parse(configJson);
       onSave(name, config);
+      setMessage("Applied");
     } catch {
-      // Keep current config if JSON is invalid
+      setMessage("Invalid JSON. Changes were not applied.");
     }
   };
 
@@ -125,6 +127,11 @@ function PropertyEditor({
           <Save className="h-4 w-4 mr-1" />
           Apply Changes
         </CyberButton>
+        {message && (
+          <p className="text-xs font-mono text-muted-foreground">
+            {message}
+          </p>
+        )}
       </div>
     </div>
   );

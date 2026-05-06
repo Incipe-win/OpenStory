@@ -162,6 +162,19 @@ body::after {
 .react-flow__background {
   background-color: var(--color-background) !important;
 }
+.workspace-flow .react-flow__background {
+  background-color: #101826 !important;
+  background-image:
+    radial-gradient(circle at 20% 18%, rgba(0, 255, 136, 0.08), transparent 28%),
+    radial-gradient(circle at 78% 72%, rgba(255, 0, 255, 0.07), transparent 30%),
+    linear-gradient(135deg, rgba(0, 212, 255, 0.04), transparent 42%);
+}
+.workspace-flow .react-flow__pane {
+  cursor: grab;
+}
+.workspace-flow .react-flow__pane:active {
+  cursor: grabbing;
+}
 .react-flow__controls-button {
   background-color: var(--color-card) !important;
   border-color: var(--color-border) !important;
@@ -172,8 +185,9 @@ body::after {
   border: 1px solid var(--color-border) !important;
 }
 .react-flow__edge-path {
-  stroke: var(--color-accent) !important;
-  stroke-opacity: 0.6;
+  stroke: var(--color-accent-tertiary) !important;
+  stroke-opacity: 0.88;
+  stroke-width: 2;
 }
 .react-flow__handle {
   background-color: var(--color-accent) !important;

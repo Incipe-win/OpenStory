@@ -1,0 +1,11 @@
+.git
+.github
+.codex
+.agents
+
+frontend
+
+tmp
+coverage
+*.log
+*.tsbuildinfo

@@ -3,27 +3,36 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"github.com/rs/zerolog"
 
 	"github.com/Incipe-win/OpenStory/internal/audit"
+	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/project"
+	"github.com/Incipe-win/OpenStory/internal/task"
 	"github.com/Incipe-win/OpenStory/internal/workflow"
 )
 
 // WorkflowHandler handles workflow API endpoints.
 type WorkflowHandler struct {
-	repo     workflow.Repository
-	projects project.Repository
-	auditLog *audit.Logger
-	log      zerolog.Logger
+	repo        workflow.Repository
+	projects    project.Repository
+	tasks       task.Repository
+	asynqClient *asynq.Client
+	auditLog    *audit.Logger
+	outbox      eventbus.EventBus
+	taskLimit   int
+	log         zerolog.Logger
 }
 
-func NewWorkflowHandler(repo workflow.Repository, projects project.Repository, auditLog *audit.Logger, log zerolog.Logger) *WorkflowHandler {
-	return &WorkflowHandler{repo: repo, projects: projects, auditLog: auditLog, log: log}
+func NewWorkflowHandler(repo workflow.Repository, projects project.Repository, tasks task.Repository, asynqClient *asynq.Client, auditLog *audit.Logger, outbox eventbus.EventBus, taskLimit int, log zerolog.Logger) *WorkflowHandler {
+	return &WorkflowHandler{repo: repo, projects: projects, tasks: tasks, asynqClient: asynqClient, auditLog: auditLog, outbox: outbox, taskLimit: taskLimit, log: log}
 }
 
 // ── Create ──────────────────────────────────────────
@@ -232,9 +241,9 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		return
 	}
 
-	status := req.Status
-	if status == "" {
-		status = existing.Status
+	status := workflow.StatusDraft
+	if req.Status != "" {
+		status = req.Status
 	}
 
 	wf := &workflow.Workflow{
@@ -288,6 +297,9 @@ func (h *WorkflowHandler) Validate(c *gin.Context) {
 	}
 
 	if err := workflow.ValidateDAG(detail.Nodes, detail.Edges); err != nil {
+		if statusErr := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusDraft); statusErr != nil {
+			h.log.Warn().Err(statusErr).Str("workflow_id", id.String()).Msg("failed to reset invalid workflow status")
+		}
 		OK(c, gin.H{
 			"valid": false,
 			"error": err.Error(),
@@ -303,13 +315,178 @@ func (h *WorkflowHandler) Validate(c *gin.Context) {
 		order[i] = gin.H{"id": n.ID, "type": n.Type, "name": n.Name}
 	}
 
+	if err := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusValidated); err != nil {
+		h.log.Error().Err(err).Msg("failed to mark workflow validated")
+		InternalError(c, "internal error")
+		return
+	}
+
 	OK(c, gin.H{
 		"valid":           true,
+		"status":          workflow.StatusValidated,
 		"nodes":           len(detail.Nodes),
 		"edges":           len(detail.Edges),
 		"execution_order": order,
 		"node_schemas":    workflow.NodeSchemas,
 	})
+}
+
+// ── Run ─────────────────────────────────────────────
+
+type runWorkflowRequest struct {
+	Provider       string `json:"provider"`
+	IdempotencyKey string `json:"idempotency_key"`
+	Input          any    `json:"input"`
+}
+
+// Run handles POST /api/workflows/:id/run
+func (h *WorkflowHandler) Run(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid workflow id")
+		return
+	}
+
+	var req runWorkflowRequest
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			BadRequest(c, err.Error())
+			return
+		}
+	}
+
+	userID := middleware.GetUserID(c)
+	detail, err := h.repo.GetDetail(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, workflow.ErrWorkflowNotFound) {
+			NotFound(c, "workflow not found")
+			return
+		}
+		h.log.Error().Err(err).Msg("failed to get workflow for run")
+		InternalError(c, "internal error")
+		return
+	}
+	if detail.UserID != userID {
+		NotFound(c, "workflow not found")
+		return
+	}
+
+	if detail.Status != workflow.StatusValidated {
+		BadRequest(c, "Please validate the workflow first")
+		return
+	}
+
+	if err := workflow.ValidateDAG(detail.Nodes, detail.Edges); err != nil {
+		if statusErr := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusDraft); statusErr != nil {
+			h.log.Warn().Err(statusErr).Str("workflow_id", id.String()).Msg("failed to reset invalid workflow status")
+		}
+		BadRequest(c, "invalid DAG: "+err.Error())
+		return
+	}
+
+	if h.tasks == nil || h.asynqClient == nil {
+		InternalError(c, "workflow runner is not configured")
+		return
+	}
+
+	if h.taskLimit > 0 {
+		active, err := h.tasks.CountActiveByUser(c.Request.Context(), userID)
+		if err != nil {
+			h.log.Error().Err(err).Msg("failed to count active tasks")
+			InternalError(c, "internal error")
+			return
+		}
+		if active >= h.taskLimit {
+			TooManyRequests(c, "task concurrency limit exceeded")
+			return
+		}
+	}
+
+	sorted, _ := workflow.TopologicalSort(detail.Nodes, detail.Edges)
+	inputJSON, err := json.Marshal(buildWorkflowRunInput(detail, sorted, req.Input))
+	if err != nil {
+		h.log.Error().Err(err).Msg("failed to marshal workflow run input")
+		InternalError(c, "internal error")
+		return
+	}
+
+	providerName := strings.TrimSpace(req.Provider)
+	if providerName == "" {
+		providerName = "mock"
+	}
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if idempotencyKey == "" {
+		idempotencyKey = fmt.Sprintf("workflow-run:%s:%s", id, uuid.NewString())
+	}
+
+	runTask := &task.GenerationTask{
+		UserID:         userID,
+		ProjectID:      detail.ProjectID,
+		WorkflowID:     &detail.ID,
+		Type:           task.TypeCreativePipeline,
+		Provider:       providerName,
+		IdempotencyKey: idempotencyKey,
+		InputJSON:      inputJSON,
+	}
+
+	if err := h.tasks.Create(c.Request.Context(), runTask); err != nil {
+		if errors.Is(err, task.ErrIdempotencyConflict) {
+			existing, _ := h.tasks.GetByIdempotencyKey(c.Request.Context(), idempotencyKey)
+			if existing != nil && existing.UserID == userID {
+				OK(c, gin.H{"task_id": existing.ID, "task": existing})
+				return
+			}
+			Conflict(c, "task with this idempotency key already exists")
+			return
+		}
+		h.log.Error().Err(err).Msg("failed to create workflow run task")
+		InternalError(c, "internal error")
+		return
+	}
+
+	_ = h.tasks.AddEvent(c.Request.Context(), runTask.ID, task.EventCreated, map[string]any{
+		"type":        runTask.Type,
+		"provider":    runTask.Provider,
+		"workflow_id": detail.ID,
+	})
+	h.publishTaskEvent(c, "task_created", runTask, map[string]any{
+		"status":      task.StatusPending,
+		"workflow_id": detail.ID,
+	})
+
+	asynqTask, err := task.NewAsynqTaskWithContext(c.Request.Context(), runTask.ID)
+	if err != nil {
+		h.log.Error().Err(err).Msg("failed to create workflow run asynq task")
+		InternalError(c, "internal error")
+		return
+	}
+
+	info, err := h.asynqClient.Enqueue(asynqTask)
+	if err != nil {
+		h.log.Error().Err(err).Msg("failed to enqueue workflow run task")
+		InternalError(c, "failed to enqueue workflow run task")
+		return
+	}
+
+	_ = h.tasks.UpdateStatus(c.Request.Context(), runTask.ID, task.StatusQueued, nil, nil)
+	_ = h.tasks.AddEvent(c.Request.Context(), runTask.ID, task.EventQueued, map[string]any{
+		"asynq_id": info.ID,
+		"queue":    info.Queue,
+	})
+	runTask.Status = task.StatusQueued
+	h.publishTaskEvent(c, "task_queued", runTask, map[string]any{
+		"status":   task.StatusQueued,
+		"asynq_id": info.ID,
+		"queue":    info.Queue,
+	})
+
+	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
+		UserID: &userID, Action: "run_workflow", ResourceType: "generation_task", ResourceID: &runTask.ID,
+		IPAddress: c.ClientIP(), UserAgent: c.GetHeader("User-Agent"),
+		NewValues: map[string]any{"workflow_id": detail.ID, "provider": runTask.Provider},
+	})
+
+	Created(c, gin.H{"task_id": runTask.ID, "task": runTask})
 }
 
 // ── Snapshot ────────────────────────────────────────
@@ -372,4 +549,117 @@ func (h *WorkflowHandler) canAccessProject(c *gin.Context, projectID, userID uui
 		return false
 	}
 	return true
+}
+
+func buildWorkflowRunInput(detail *workflow.WorkflowDetail, sorted []workflow.Node, userInput any) map[string]any {
+	nodes := make([]map[string]any, len(detail.Nodes))
+	for i, n := range detail.Nodes {
+		nodes[i] = serializeWorkflowNode(n)
+	}
+
+	edges := make([]map[string]any, len(detail.Edges))
+	for i, e := range detail.Edges {
+		edges[i] = map[string]any{
+			"id":             e.ID,
+			"source_node_id": e.SourceNodeID,
+			"target_node_id": e.TargetNodeID,
+			"source_handle":  e.SourceHandle,
+			"target_handle":  e.TargetHandle,
+		}
+	}
+
+	executionOrder := make([]map[string]any, len(sorted))
+	for i, n := range sorted {
+		executionOrder[i] = map[string]any{
+			"id":   n.ID,
+			"type": n.Type,
+			"name": n.Name,
+		}
+	}
+
+	if userInput == nil {
+		userInput = map[string]any{}
+	}
+
+	return map[string]any{
+		"prompt":          workflowRunPrompt(detail, sorted, userInput),
+		"input":           userInput,
+		"workflow_id":     detail.ID,
+		"workflow_name":   detail.Name,
+		"description":     detail.Description,
+		"nodes":           nodes,
+		"edges":           edges,
+		"execution_order": executionOrder,
+	}
+}
+
+func serializeWorkflowNode(n workflow.Node) map[string]any {
+	var config any = map[string]any{}
+	if len(n.ConfigJSON) > 0 {
+		if err := json.Unmarshal(n.ConfigJSON, &config); err != nil {
+			config = map[string]any{}
+		}
+	}
+
+	return map[string]any{
+		"id":         n.ID,
+		"type":       n.Type,
+		"name":       n.Name,
+		"config":     config,
+		"position_x": n.PositionX,
+		"position_y": n.PositionY,
+	}
+}
+
+func workflowRunPrompt(detail *workflow.WorkflowDetail, sorted []workflow.Node, userInput any) string {
+	if prompt := stringField(userInput, "prompt", "idea", "text", "description", "brief", "topic"); prompt != "" {
+		return prompt
+	}
+
+	for _, n := range sorted {
+		var config any
+		if len(n.ConfigJSON) == 0 {
+			continue
+		}
+		if err := json.Unmarshal(n.ConfigJSON, &config); err != nil {
+			continue
+		}
+		if prompt := stringField(config, "prompt", "idea", "text", "description", "brief", "topic"); prompt != "" {
+			return prompt
+		}
+	}
+
+	if strings.TrimSpace(detail.Description) != "" {
+		return detail.Description
+	}
+	if strings.TrimSpace(detail.Name) != "" {
+		return detail.Name
+	}
+	return "Run this OpenStory workflow and generate a concise AI short-video plan."
+}
+
+func stringField(value any, keys ...string) string {
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, key := range keys {
+		if s, ok := obj[key].(string); ok {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+func (h *WorkflowHandler) publishTaskEvent(c *gin.Context, eventType string, t *task.GenerationTask, payload map[string]any) {
+	if h.outbox == nil {
+		return
+	}
+	payload["task_type"] = t.Type
+	payload["provider"] = t.Provider
+	payload["project_id"] = t.ProjectID
+	_ = h.outbox.Publish(c.Request.Context(), eventbus.TopicGenerationTaskEvents,
+		eventbus.NewEvent(eventType, "generation_task", t.ID, payload).WithUser(t.UserID))
 }

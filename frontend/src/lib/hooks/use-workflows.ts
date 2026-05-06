@@ -55,7 +55,30 @@ export function useUpdateWorkflow() {
 }
 
 export function useValidateWorkflow() {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (id: string) => workflowsApi.validate(id),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.workflows.detail(id) });
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+    },
+  });
+}
+
+export function useRunWorkflow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => workflowsApi.run(id),
+    onSuccess: (run, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.workflows.detail(id) });
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      if (run.task?.project_id) {
+        queryClient.invalidateQueries({
+          queryKey: ["projects", run.task.project_id, "tasks"],
+        });
+      }
+    },
   });
 }

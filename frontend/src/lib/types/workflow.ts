@@ -1,3 +1,5 @@
+import type { GenerationTask } from "@/lib/types/task";
+
 export type NodeType =
   | "idea"
   | "script"
@@ -62,11 +64,23 @@ export interface UpdateWorkflowInput {
   edges: WorkflowEdge[];
 }
 
+export interface WorkflowExecutionNode {
+  id: string;
+  type: NodeType;
+  name: string;
+}
+
 export interface ValidateResult {
   valid: boolean;
   error?: string;
-  execution_order?: string[];
+  status?: string;
+  execution_order?: WorkflowExecutionNode[];
   node_schemas?: Record<string, unknown>;
+}
+
+export interface WorkflowRun {
+  task_id: string;
+  task?: GenerationTask;
 }
 
 export interface WorkflowVersion {

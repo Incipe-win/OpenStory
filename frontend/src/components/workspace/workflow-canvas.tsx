@@ -1,14 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   ReactFlow,
+  ReactFlowProvider,
   Background,
   Controls,
   MiniMap,
-  useNodesState,
-  useEdgesState,
-  addEdge,
+  Panel,
+  useReactFlow,
   applyEdgeChanges,
   applyNodeChanges,
   type Connection,
@@ -26,6 +26,7 @@ import { useWorkspaceStore } from "@/lib/stores/workspace-store";
 import { getNodeDef } from "@/lib/utils/nodes";
 import type { NodeType, WorkflowNode, WorkflowEdge } from "@/lib/types/workflow";
 import { v4 as uuidv4 } from "uuid";
+import { Maximize2 } from "lucide-react";
 
 const nodeTypes: NodeTypes = {
   idea: BaseNode,
@@ -88,21 +89,21 @@ function fromFlowEdge(edge: Edge): WorkflowEdge {
 }
 
 export function WorkflowCanvas() {
+  return (
+    <ReactFlowProvider>
+      <WorkflowCanvasSurface />
+    </ReactFlowProvider>
+  );
+}
+
+function WorkflowCanvasSurface() {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const { screenToFlowPosition, fitView } = useReactFlow();
+  const previousNodeCount = useRef(0);
   const { nodes: storeNodes, edges: storeEdges, setNodes, setEdges, setSelectedNode, addNode } = useWorkspaceStore();
 
-  const initialNodes = useMemo(() => storeNodes.map(toFlowNode), [storeNodes]);
-  const initialEdges = useMemo((): Edge[] => storeEdges.map(toFlowEdge), [storeEdges]);
-
-  const [flowNodes, setFlowNodes] = useNodesState(initialNodes);
-  const [flowEdges, setFlowEdges] = useEdgesState(initialEdges);
-
-  useEffect(() => {
-    setFlowNodes(storeNodes.map(toFlowNode));
-  }, [setFlowNodes, storeNodes]);
-
-  useEffect(() => {
-    setFlowEdges(storeEdges.map(toFlowEdge));
-  }, [setFlowEdges, storeEdges]);
+  const flowNodes = useMemo(() => storeNodes.map(toFlowNode), [storeNodes]);
+  const flowEdges = useMemo((): Edge[] => storeEdges.map(toFlowEdge), [storeEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -113,11 +114,19 @@ export function WorkflowCanvas() {
         source_handle: connection.sourceHandle || "",
         target_handle: connection.targetHandle || "",
       };
-      setFlowEdges((current) => addEdge(toFlowEdge(edge), current));
       setEdges([...storeEdges, edge]);
     },
-    [setEdges, setFlowEdges, storeEdges]
+    [setEdges, storeEdges]
   );
+
+  useEffect(() => {
+    if (storeNodes.length > previousNodeCount.current && storeNodes.length > 0) {
+      window.requestAnimationFrame(() => {
+        fitView({ padding: 0.24, duration: 220 });
+      });
+    }
+    previousNodeCount.current = storeNodes.length;
+  }, [fitView, storeNodes.length]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -138,8 +147,10 @@ export function WorkflowCanvas() {
 
       const type = typeStr as NodeType;
       const def = getNodeDef(type);
-
-      const position = { x: event.clientX - 300, y: event.clientY - 100 };
+      const position = screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
       const newNode: WorkflowNode = {
         id: uuidv4(),
         type,
@@ -149,8 +160,9 @@ export function WorkflowCanvas() {
         position_y: Math.round(position.y),
       };
       addNode(newNode);
+      setSelectedNode(newNode.id);
     },
-    [addNode]
+    [addNode, screenToFlowPosition, setSelectedNode]
   );
 
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -161,30 +173,28 @@ export function WorkflowCanvas() {
   // Sync flow changes back to store
   const handleNodesChange: OnNodesChange = useCallback(
     (changes) => {
-      setFlowNodes((current) => {
-        const updatedNodes = applyNodeChanges(changes, current);
-        const existingMap = new Map(storeNodes.map((n) => [n.id, n]));
-        setNodes(updatedNodes.map((n) => fromFlowNode(n, existingMap.get(n.id))));
-        return updatedNodes;
-      });
+      const updatedNodes = applyNodeChanges(changes, flowNodes);
+      const existingMap = new Map(storeNodes.map((n) => [n.id, n]));
+      setNodes(updatedNodes.map((n) => fromFlowNode(n, existingMap.get(n.id))));
     },
-    [setFlowNodes, setNodes, storeNodes]
+    [flowNodes, setNodes, storeNodes]
   );
 
   const handleEdgesChange: OnEdgesChange = useCallback(
     (changes) => {
-      setFlowEdges((current) => {
-        const updatedEdges = applyEdgeChanges(changes, current);
-        setEdges(updatedEdges.map(fromFlowEdge));
-        return updatedEdges;
-      });
+      const updatedEdges = applyEdgeChanges(changes, flowEdges);
+      setEdges(updatedEdges.map(fromFlowEdge));
     },
-    [setEdges, setFlowEdges]
+    [flowEdges, setEdges]
   );
 
   return (
-    <div className="w-full h-full">
+    <div
+      ref={wrapperRef}
+      className="w-full h-full bg-[#101826]"
+    >
       <ReactFlow
+        className="workspace-flow"
         nodes={flowNodes}
         edges={flowEdges}
         onNodesChange={handleNodesChange}
@@ -200,17 +210,30 @@ export function WorkflowCanvas() {
         multiSelectionKeyCode="Shift"
         snapToGrid
         snapGrid={[10, 10]}
+        minZoom={0.2}
+        maxZoom={1.8}
+        fitViewOptions={{ padding: 0.18, includeHiddenNodes: false }}
       >
         <Background
-          variant={BackgroundVariant.Dots}
-          gap={20}
-          size={1}
-          color="#2a2a3a"
+          variant={BackgroundVariant.Lines}
+          gap={28}
+          size={1.2}
+          color="rgba(0, 212, 255, 0.22)"
         />
-        <Controls className="!bg-card !border-border !rounded-none" />
+        <Controls className="!bg-card !border-border !rounded-none !shadow-[var(--shadow-neon-sm)]" />
+        <Panel position="top-right" className="m-3">
+          <button
+            type="button"
+            onClick={() => fitView({ padding: 0.18, duration: 250 })}
+            className="h-8 w-8 grid place-items-center bg-card border border-border text-muted-foreground hover:text-accent hover:border-accent/50 transition-colors cyber-chamfer-xs"
+            aria-label="Fit view"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </button>
+        </Panel>
         <MiniMap
-          className="!bg-card !border-border"
-          maskColor="rgba(0,0,0,0.7)"
+          className="!bg-card !border-border !shadow-[var(--shadow-neon-sm)]"
+          maskColor="rgba(10, 12, 18, 0.58)"
           nodeColor={(node) => {
             const data = node.data as { nodeType?: NodeType } | undefined;
             return data?.nodeType ? getNodeDef(data.nodeType).color : "#00ff88";

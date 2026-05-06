@@ -8,6 +8,7 @@ import type {
   CreateWorkflowInput,
   UpdateWorkflowInput,
   ValidateResult,
+  WorkflowRun,
   WorkflowVersion,
 } from "@/lib/types/workflow";
 
@@ -49,6 +50,11 @@ export const workflowsApi = {
   validate: (id: string) =>
     apiClient
       .post<ApiResponse<ValidateResult>>(`/api/workflows/${id}/validate`)
+      .then((r) => r.data.data),
+
+  run: (id: string) =>
+    apiClient
+      .post<ApiResponse<WorkflowRun>>(`/api/workflows/${id}/run`, {})
       .then((r) => r.data.data),
 
   snapshot: (id: string) =>

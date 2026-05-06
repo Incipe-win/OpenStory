@@ -45,6 +45,15 @@ func ValidNodeType(t string) bool {
 
 // ── Models ──────────────────────────────────────────
 
+const (
+	StatusDraft     = "draft"
+	StatusValidated = "validated"
+	StatusRunning   = "running"
+	StatusCompleted = "completed"
+	StatusFailed    = "failed"
+	StatusCancelled = "cancelled"
+)
+
 // Workflow represents a DAG workflow for a project.
 type Workflow struct {
 	ID             uuid.UUID `json:"id"`
@@ -61,7 +70,7 @@ type Workflow struct {
 // Node represents a single node in the workflow DAG.
 type Node struct {
 	ID         uuid.UUID       `json:"id"`
-	WorkflowID uuid.UUID      `json:"workflow_id"`
+	WorkflowID uuid.UUID       `json:"workflow_id"`
 	Type       NodeType        `json:"type"`
 	Name       string          `json:"name"`
 	ConfigJSON json.RawMessage `json:"config"`
