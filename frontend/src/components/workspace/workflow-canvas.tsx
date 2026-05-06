@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -11,9 +11,13 @@ import {
   useReactFlow,
   applyEdgeChanges,
   applyNodeChanges,
+  useEdgesState,
+  useNodesState,
   type Connection,
   type Node,
   type Edge,
+  type NodeChange,
+  type EdgeChange,
   type OnNodesChange,
   type OnEdgesChange,
   type NodeTypes,
@@ -56,6 +60,18 @@ function toFlowNode(n: WorkflowNode): Node {
   };
 }
 
+function mergeFlowNode(existing: Node | undefined, node: WorkflowNode): Node {
+  const next = toFlowNode(node);
+  if (!existing) return next;
+
+  return {
+    ...existing,
+    ...next,
+    position: next.position,
+    data: next.data,
+  };
+}
+
 function toFlowEdge(e: WorkflowEdge): Edge {
   return {
     id: e.id,
@@ -64,6 +80,11 @@ function toFlowEdge(e: WorkflowEdge): Edge {
     sourceHandle: e.source_handle,
     targetHandle: e.target_handle,
   };
+}
+
+function mergeFlowEdge(existing: Edge | undefined, edge: WorkflowEdge): Edge {
+  const next = toFlowEdge(edge);
+  return existing ? { ...existing, ...next } : next;
 }
 
 function fromFlowNode(node: Node, existing: WorkflowNode | undefined): WorkflowNode {
@@ -88,6 +109,14 @@ function fromFlowEdge(edge: Edge): WorkflowEdge {
   };
 }
 
+function shouldSyncNodeChange(change: NodeChange) {
+  return change.type === "position" || change.type === "remove" || change.type === "add" || change.type === "replace";
+}
+
+function shouldSyncEdgeChange(change: EdgeChange) {
+  return change.type !== "select";
+}
+
 export function WorkflowCanvas() {
   return (
     <ReactFlowProvider>
@@ -101,9 +130,22 @@ function WorkflowCanvasSurface() {
   const { screenToFlowPosition, fitView } = useReactFlow();
   const previousNodeCount = useRef(0);
   const { nodes: storeNodes, edges: storeEdges, setNodes, setEdges, setSelectedNode, addNode } = useWorkspaceStore();
+  const [flowNodes, setFlowNodes] = useNodesState<Node>([]);
+  const [flowEdges, setFlowEdges] = useEdgesState<Edge>([]);
 
-  const flowNodes = useMemo(() => storeNodes.map(toFlowNode), [storeNodes]);
-  const flowEdges = useMemo((): Edge[] => storeEdges.map(toFlowEdge), [storeEdges]);
+  useEffect(() => {
+    setFlowNodes((currentNodes) => {
+      const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+      return storeNodes.map((node) => mergeFlowNode(currentById.get(node.id), node));
+    });
+  }, [setFlowNodes, storeNodes]);
+
+  useEffect(() => {
+    setFlowEdges((currentEdges) => {
+      const currentById = new Map(currentEdges.map((edge) => [edge.id, edge]));
+      return storeEdges.map((edge) => mergeFlowEdge(currentById.get(edge.id), edge));
+    });
+  }, [setFlowEdges, storeEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -174,18 +216,34 @@ function WorkflowCanvasSurface() {
   const handleNodesChange: OnNodesChange = useCallback(
     (changes) => {
       const updatedNodes = applyNodeChanges(changes, flowNodes);
+      setFlowNodes(updatedNodes);
+
+      if (!changes.some(shouldSyncNodeChange)) return;
+
       const existingMap = new Map(storeNodes.map((n) => [n.id, n]));
       setNodes(updatedNodes.map((n) => fromFlowNode(n, existingMap.get(n.id))));
+
+      if (changes.some((change) => change.type === "remove")) {
+        const nodeIds = new Set(updatedNodes.map((node) => node.id));
+        setEdges(
+          storeEdges.filter(
+            (edge) => nodeIds.has(edge.source_node_id) && nodeIds.has(edge.target_node_id)
+          )
+        );
+      }
     },
-    [flowNodes, setNodes, storeNodes]
+    [flowNodes, setEdges, setFlowNodes, setNodes, storeEdges, storeNodes]
   );
 
   const handleEdgesChange: OnEdgesChange = useCallback(
     (changes) => {
       const updatedEdges = applyEdgeChanges(changes, flowEdges);
+      setFlowEdges(updatedEdges);
+
+      if (!changes.some(shouldSyncEdgeChange)) return;
       setEdges(updatedEdges.map(fromFlowEdge));
     },
-    [flowEdges, setEdges]
+    [flowEdges, setEdges, setFlowEdges]
   );
 
   return (
