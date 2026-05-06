@@ -3,7 +3,12 @@
 import { CyberButton } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useWorkspaceStore } from "@/lib/stores/workspace-store";
-import { useRunWorkflow, useUpdateWorkflow, useValidateWorkflow } from "@/lib/hooks/use-workflows";
+import {
+  usePublishWorkflow,
+  useRunWorkflow,
+  useUpdateWorkflow,
+  useValidateWorkflow,
+} from "@/lib/hooks/use-workflows";
 import { apiErrorMessage } from "@/lib/api-errors";
 import {
   Save,
@@ -12,6 +17,7 @@ import {
   Check,
   X,
   Play,
+  UploadCloud,
 } from "lucide-react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -27,17 +33,27 @@ export function WorkflowToolbar({ workflowId, workflowName, workflowStatus }: Wo
   const { nodes, edges, isDirty, setDirty } = useWorkspaceStore();
   const updateWorkflow = useUpdateWorkflow();
   const validateWorkflow = useValidateWorkflow();
+  const publishWorkflow = usePublishWorkflow();
   const runWorkflow = useRunWorkflow();
   const router = useRouter();
   const toast = useToast();
+  const [currentStatus, setCurrentStatus] = useState(workflowStatus);
 
   const [validation, setValidation] = useState<{
     valid?: boolean;
     error?: string;
     order?: WorkflowExecutionNode[];
-  } | null>(() => (workflowStatus === "validated" ? { valid: true } : null));
+  } | null>(() =>
+    workflowStatus === "validated" || workflowStatus === "published"
+      ? { valid: true }
+      : null
+  );
 
-  const canRun = validation?.valid === true && !isDirty;
+  const isPublished = currentStatus === "published";
+  const isValidated =
+    validation?.valid === true || currentStatus === "validated" || isPublished;
+  const canPublish = isValidated && !isDirty && !isPublished;
+  const canRun = isPublished && !isDirty;
 
   const handleSave = () => {
     updateWorkflow.mutate(
@@ -51,7 +67,8 @@ export function WorkflowToolbar({ workflowId, workflowName, workflowStatus }: Wo
         onSuccess: () => {
           setDirty(false);
           setValidation(null);
-          toast.success("Workflow saved", "Validate it again before running.");
+          setCurrentStatus("draft");
+          toast.success("Workflow saved", "Validate it again before publishing.");
         },
         onError: (error) => {
           toast.error("Save failed", apiErrorMessage(error, "Unable to save workflow."));
@@ -74,13 +91,36 @@ export function WorkflowToolbar({ workflowId, workflowName, workflowStatus }: Wo
           order: data.execution_order,
         });
         if (data.valid) {
-          toast.success("Workflow validated", "Run is now available.");
+          setCurrentStatus(data.status || "validated");
+          toast.success("Workflow validated", "Publish it before running.");
         } else {
+          setCurrentStatus("draft");
           toast.error("Validation failed", data.error || "Please fix the workflow.");
         }
       },
       onError: (error) => {
         toast.error("Validation failed", apiErrorMessage(error, "Unable to validate workflow."));
+      },
+    });
+  };
+
+  const handlePublish = () => {
+    if (isDirty) {
+      toast.info("Save required", "Save the workflow before publishing.");
+      return;
+    }
+    if (!isValidated) {
+      toast.info("Please validate the workflow first");
+      return;
+    }
+
+    publishWorkflow.mutate(workflowId, {
+      onSuccess: () => {
+        setCurrentStatus("published");
+        toast.success("Workflow published", "Run is now available.");
+      },
+      onError: (error) => {
+        toast.error("Publish failed", apiErrorMessage(error, "Unable to publish workflow."));
       },
     });
   };
@@ -95,8 +135,8 @@ export function WorkflowToolbar({ workflowId, workflowName, workflowStatus }: Wo
   const handleRun = () => {
     if (!canRun) {
       toast.info(
-        "Please validate the workflow first",
-        isDirty ? "Save and validate the latest changes before running." : undefined
+        "Please publish the workflow first",
+        isDirty ? "Save, validate, and publish the latest changes before running." : undefined
       );
       return;
     }
@@ -173,12 +213,24 @@ export function WorkflowToolbar({ workflowId, workflowName, workflowStatus }: Wo
       </CyberButton>
 
       <CyberButton
+        variant="outline"
+        size="sm"
+        onClick={handlePublish}
+        loading={publishWorkflow.isPending}
+        disabled={!canPublish}
+        title={!canPublish ? "Validate the saved workflow before publishing" : "Publish workflow"}
+      >
+        <UploadCloud className="h-4 w-4 mr-1" />
+        Publish
+      </CyberButton>
+
+      <CyberButton
         variant="glitch"
         size="sm"
         onClick={handleRun}
         loading={runWorkflow.isPending}
         disabled={!canRun}
-        title={!canRun ? "Validate the saved workflow before running" : "Run workflow"}
+        title={!canRun ? "Publish the saved workflow before running" : "Run workflow"}
       >
         <Play className="h-4 w-4 mr-1" />
         Run

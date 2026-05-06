@@ -48,8 +48,15 @@ export function useUpdateWorkflow() {
   return useMutation({
     mutationFn: ({ id, ...input }: { id: string } & UpdateWorkflowInput) =>
       workflowsApi.update(id, input),
-    onSuccess: (_, { id }) => {
+    onSuccess: (detail, { id }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows.detail(id) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.workflows.byProject(detail.workflow.project_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.projects.detail(detail.workflow.project_id),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
     },
   });
 }
@@ -59,8 +66,33 @@ export function useValidateWorkflow() {
 
   return useMutation({
     mutationFn: (id: string) => workflowsApi.validate(id),
-    onSuccess: (_, id) => {
+    onSuccess: (result, id) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.workflows.detail(id) });
+      queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      if (result.project_id) {
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.projects.detail(result.project_id),
+        });
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+      }
+    },
+  });
+}
+
+export function usePublishWorkflow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => workflowsApi.publish(id),
+    onSuccess: (detail, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.workflows.detail(id) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.workflows.byProject(detail.workflow.project_id),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.projects.detail(detail.workflow.project_id),
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
     },
   });

@@ -52,6 +52,11 @@ export const workflowsApi = {
       .post<ApiResponse<ValidateResult>>(`/api/workflows/${id}/validate`)
       .then((r) => r.data.data),
 
+  publish: (id: string) =>
+    apiClient
+      .post<ApiResponse<WorkflowDetail | FlatWorkflowDetail>>(`/api/workflows/${id}/publish`)
+      .then((r) => normalizeWorkflowDetail(r.data.data)),
+
   run: (id: string) =>
     apiClient
       .post<ApiResponse<WorkflowRun>>(`/api/workflows/${id}/run`, {})

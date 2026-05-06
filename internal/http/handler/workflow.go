@@ -164,7 +164,7 @@ type edgeInput struct {
 type updateWorkflowRequest struct {
 	Name        string      `json:"name"        binding:"required,min=1,max=255"`
 	Description string      `json:"description" binding:"max=5000"`
-	Status      string      `json:"status"      binding:"omitempty,oneof=draft running completed failed cancelled"`
+	Status      string      `json:"status"      binding:"omitempty,oneof=draft validated published"`
 	Nodes       []nodeInput `json:"nodes"       binding:"required"`
 	Edges       []edgeInput `json:"edges"`
 }
@@ -241,16 +241,11 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		return
 	}
 
-	status := workflow.StatusDraft
-	if req.Status != "" {
-		status = req.Status
-	}
-
 	wf := &workflow.Workflow{
 		ID:          id,
 		Name:        req.Name,
 		Description: req.Description,
-		Status:      status,
+		Status:      workflow.StatusDraft,
 	}
 
 	if err := h.repo.Update(c.Request.Context(), wf, nodes, edges); err != nil {
@@ -258,6 +253,7 @@ func (h *WorkflowHandler) Update(c *gin.Context) {
 		InternalError(c, "internal error")
 		return
 	}
+	h.refreshProjectStatus(c, existing.ProjectID)
 
 	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
 		UserID: &userID, Action: "update_workflow", ResourceType: "workflow", ResourceID: &id,
@@ -300,11 +296,13 @@ func (h *WorkflowHandler) Validate(c *gin.Context) {
 		if statusErr := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusDraft); statusErr != nil {
 			h.log.Warn().Err(statusErr).Str("workflow_id", id.String()).Msg("failed to reset invalid workflow status")
 		}
+		h.refreshProjectStatus(c, detail.ProjectID)
 		OK(c, gin.H{
-			"valid": false,
-			"error": err.Error(),
-			"nodes": len(detail.Nodes),
-			"edges": len(detail.Edges),
+			"valid":      false,
+			"error":      err.Error(),
+			"project_id": detail.ProjectID,
+			"nodes":      len(detail.Nodes),
+			"edges":      len(detail.Edges),
 		})
 		return
 	}
@@ -315,20 +313,83 @@ func (h *WorkflowHandler) Validate(c *gin.Context) {
 		order[i] = gin.H{"id": n.ID, "type": n.Type, "name": n.Name}
 	}
 
-	if err := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusValidated); err != nil {
+	nextStatus := workflow.StatusValidated
+	if detail.Status == workflow.StatusPublished {
+		nextStatus = workflow.StatusPublished
+	}
+	if err := h.repo.UpdateStatus(c.Request.Context(), id, nextStatus); err != nil {
 		h.log.Error().Err(err).Msg("failed to mark workflow validated")
 		InternalError(c, "internal error")
 		return
 	}
+	h.refreshProjectStatus(c, detail.ProjectID)
 
 	OK(c, gin.H{
 		"valid":           true,
-		"status":          workflow.StatusValidated,
+		"status":          nextStatus,
+		"project_id":      detail.ProjectID,
 		"nodes":           len(detail.Nodes),
 		"edges":           len(detail.Edges),
 		"execution_order": order,
 		"node_schemas":    workflow.NodeSchemas,
 	})
+}
+
+// ── Publish ─────────────────────────────────────────
+
+// Publish handles POST /api/workflows/:id/publish
+func (h *WorkflowHandler) Publish(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid workflow id")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	detail, err := h.repo.GetDetail(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, workflow.ErrWorkflowNotFound) {
+			NotFound(c, "workflow not found")
+			return
+		}
+		h.log.Error().Err(err).Msg("failed to get workflow for publish")
+		InternalError(c, "internal error")
+		return
+	}
+	if detail.UserID != userID {
+		NotFound(c, "workflow not found")
+		return
+	}
+
+	if detail.Status != workflow.StatusValidated && detail.Status != workflow.StatusPublished {
+		BadRequest(c, "Please validate the workflow first")
+		return
+	}
+
+	if err := workflow.ValidateDAG(detail.Nodes, detail.Edges); err != nil {
+		if statusErr := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusDraft); statusErr != nil {
+			h.log.Warn().Err(statusErr).Str("workflow_id", id.String()).Msg("failed to reset invalid workflow status")
+		}
+		h.refreshProjectStatus(c, detail.ProjectID)
+		BadRequest(c, "invalid DAG: "+err.Error())
+		return
+	}
+
+	if err := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusPublished); err != nil {
+		h.log.Error().Err(err).Msg("failed to publish workflow")
+		InternalError(c, "internal error")
+		return
+	}
+	h.refreshProjectStatus(c, detail.ProjectID)
+
+	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
+		UserID: &userID, Action: "publish_workflow", ResourceType: "workflow", ResourceID: &id,
+		IPAddress: c.ClientIP(), UserAgent: c.GetHeader("User-Agent"),
+		NewValues: map[string]any{"status": workflow.StatusPublished},
+	})
+
+	detail.Status = workflow.StatusPublished
+	OK(c, detail)
 }
 
 // ── Run ─────────────────────────────────────────────
@@ -371,8 +432,8 @@ func (h *WorkflowHandler) Run(c *gin.Context) {
 		return
 	}
 
-	if detail.Status != workflow.StatusValidated {
-		BadRequest(c, "Please validate the workflow first")
+	if detail.Status != workflow.StatusPublished {
+		BadRequest(c, "Please publish the workflow first")
 		return
 	}
 
@@ -380,6 +441,7 @@ func (h *WorkflowHandler) Run(c *gin.Context) {
 		if statusErr := h.repo.UpdateStatus(c.Request.Context(), id, workflow.StatusDraft); statusErr != nil {
 			h.log.Warn().Err(statusErr).Str("workflow_id", id.String()).Msg("failed to reset invalid workflow status")
 		}
+		h.refreshProjectStatus(c, detail.ProjectID)
 		BadRequest(c, "invalid DAG: "+err.Error())
 		return
 	}
@@ -549,6 +611,18 @@ func (h *WorkflowHandler) canAccessProject(c *gin.Context, projectID, userID uui
 		return false
 	}
 	return true
+}
+
+func (h *WorkflowHandler) refreshProjectStatus(c *gin.Context, projectID uuid.UUID) {
+	if h.projects == nil {
+		return
+	}
+	if err := h.projects.RefreshStatusFromPublishedWorkflows(c.Request.Context(), projectID); err != nil {
+		if errors.Is(err, project.ErrProjectNotFound) {
+			return
+		}
+		h.log.Warn().Err(err).Str("project_id", projectID.String()).Msg("failed to refresh project status")
+	}
 }
 
 func buildWorkflowRunInput(detail *workflow.WorkflowDetail, sorted []workflow.Node, userInput any) map[string]any {

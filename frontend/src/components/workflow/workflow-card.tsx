@@ -37,8 +37,12 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
     event.preventDefault();
     event.stopPropagation();
 
-    if (workflow.status !== "validated") {
-      toast.info("Please validate the workflow first");
+    if (workflow.status !== "published") {
+      toast.info(
+        workflow.status === "validated"
+          ? "Please publish the workflow first"
+          : "Please validate and publish the workflow first"
+      );
       return;
     }
 

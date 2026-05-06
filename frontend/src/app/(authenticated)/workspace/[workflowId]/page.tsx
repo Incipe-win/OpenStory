@@ -48,6 +48,7 @@ export default function WorkspacePage({
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <WorkflowToolbar
+          key={`${workflowId}:${data.workflow.status}`}
           workflowId={workflowId}
           workflowName={data.workflow.name}
           workflowStatus={data.workflow.status}

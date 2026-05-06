@@ -21,6 +21,7 @@ type Repository interface {
 	GetProject(ctx context.Context, id uuid.UUID) (*Project, error)
 	ListProjects(ctx context.Context, userID uuid.UUID, page, pageSize int) ([]Project, int, error)
 	UpdateProject(ctx context.Context, id, userID uuid.UUID, name, description *string, status *string) error
+	RefreshStatusFromPublishedWorkflows(ctx context.Context, id uuid.UUID) error
 	GetWork(ctx context.Context, id uuid.UUID) (*Work, error)
 	PublishWork(ctx context.Context, id, userID uuid.UUID) error
 	ListPublishedWorks(ctx context.Context, page, pageSize int) ([]Work, int, error)
@@ -111,6 +112,37 @@ func (r *PgRepository) UpdateProject(ctx context.Context, id, userID uuid.UUID, 
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrProjectNotFound
+	}
+	return nil
+}
+
+func (r *PgRepository) RefreshStatusFromPublishedWorkflows(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE projects
+		 SET status = CASE
+			WHEN EXISTS (
+				SELECT 1 FROM workflows
+				WHERE project_id = $1 AND status = 'published'
+			) THEN 'active'
+			ELSE 'draft'
+		 END
+		 WHERE id = $1 AND status != 'archived'`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("refreshing project status: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		p, getErr := r.GetProject(ctx, id)
+		if errors.Is(getErr, ErrProjectNotFound) {
+			return ErrProjectNotFound
+		}
+		if getErr != nil {
+			return getErr
+		}
+		if p.Status != StatusArchived {
+			return ErrProjectNotFound
+		}
 	}
 	return nil
 }

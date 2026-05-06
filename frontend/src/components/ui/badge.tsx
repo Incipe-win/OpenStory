@@ -9,9 +9,12 @@ interface StatusBadgeProps {
 }
 
 const statusStyles: Record<string, string> = {
+  draft: "bg-muted text-muted-foreground border-muted",
   pending: "bg-muted text-muted-foreground border-muted",
   queued: "bg-accent-tertiary/10 text-accent-tertiary border-accent-tertiary/30",
-  validated: "bg-accent/10 text-accent border-accent/40",
+  validated: "bg-yellow-500/10 text-yellow-300 border-yellow-500/40",
+  published: "bg-accent/15 text-accent border-accent/50",
+  active: "bg-accent/15 text-accent border-accent/50",
   running:
     "bg-accent/10 text-accent border-accent/30 animate-[pulse_2s_ease-in-out_infinite]",
   succeeded: "bg-accent/15 text-accent border-accent/50",

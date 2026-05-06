@@ -129,6 +129,7 @@ func New(deps Deps) *gin.Engine {
 			workflows.GET("/:id", wfH.Get)
 			workflows.PUT("/:id", wfH.Update)
 			workflows.POST("/:id/validate", wfH.Validate)
+			workflows.POST("/:id/publish", wfH.Publish)
 			workflows.POST("/:id/snapshot", wfH.Snapshot)
 			workflows.POST("/:id/run", wfH.Run)
 		}

@@ -6,6 +6,12 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	StatusDraft    = "draft"
+	StatusActive   = "active"
+	StatusArchived = "archived"
+)
+
 // Project represents a video creation project.
 type Project struct {
 	ID           uuid.UUID `json:"id"`

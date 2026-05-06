@@ -48,6 +48,7 @@ func ValidNodeType(t string) bool {
 const (
 	StatusDraft     = "draft"
 	StatusValidated = "validated"
+	StatusPublished = "published"
 	StatusRunning   = "running"
 	StatusCompleted = "completed"
 	StatusFailed    = "failed"

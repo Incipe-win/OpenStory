@@ -74,6 +74,7 @@ export interface ValidateResult {
   valid: boolean;
   error?: string;
   status?: string;
+  project_id?: string;
   execution_order?: WorkflowExecutionNode[];
   node_schemas?: Record<string, unknown>;
 }
