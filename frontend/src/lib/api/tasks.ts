@@ -2,6 +2,8 @@ import apiClient from "@/lib/api-client";
 import type { ApiResponse, PaginatedResponse } from "@/lib/types/api";
 import type { GenerationTask, TaskEvent, CreateTaskInput } from "@/lib/types/task";
 
+type TaskEventResponse = TaskEvent & { type?: string };
+
 export const tasksApi = {
   create: (input: CreateTaskInput) =>
     apiClient
@@ -20,8 +22,13 @@ export const tasksApi = {
 
   getEvents: (id: string) =>
     apiClient
-      .get<ApiResponse<TaskEvent[]>>(`/api/generation/tasks/${id}/events`)
-      .then((r) => r.data.data),
+      .get<ApiResponse<TaskEventResponse[]>>(`/api/generation/tasks/${id}/events`)
+      .then((r) =>
+        r.data.data.map((event) => ({
+          ...event,
+          event_type: event.event_type || event.type || "",
+        }))
+      ),
 
   listByProject: (projectId: string, page = 1, pageSize = 20) =>
     apiClient

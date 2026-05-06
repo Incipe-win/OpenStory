@@ -1,12 +1,15 @@
 import axios, { AxiosError } from "axios";
 import { API_BASE_URL } from "@/lib/config";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { setAccessTokenCookie } from "@/lib/auth-cookies";
 import type { ApiResponse, ApiError } from "@/lib/types/api";
 import type { TokenPair } from "@/lib/types/auth";
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { "Content-Type": "application/json" },
+  timeout: 15_000,
+  timeoutErrorMessage: "API request timed out",
 });
 
 // Request interceptor: attach Bearer token
@@ -53,6 +56,8 @@ apiClient.interceptors.response.use(
           tokens.access_token,
           tokens.refresh_token
         );
+        setAccessTokenCookie(tokens.access_token, tokenMaxAgeSeconds(tokens));
+        originalRequest.headers = originalRequest.headers ?? {};
         originalRequest.headers.Authorization = `Bearer ${tokens.access_token}`;
         return apiClient(originalRequest);
       } catch {
@@ -76,6 +81,12 @@ async function authRefresh(
     { refresh_token: refreshToken }
   );
   return res.data.data;
+}
+
+function tokenMaxAgeSeconds(tokens: TokenPair) {
+  if (tokens.expires_in) return tokens.expires_in;
+  if (tokens.expires_at) return Math.max(0, tokens.expires_at - Date.now() / 1000);
+  return 86400;
 }
 
 export default apiClient;

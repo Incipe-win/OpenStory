@@ -10,18 +10,20 @@ import (
 
 	"github.com/Incipe-win/OpenStory/internal/audit"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
+	"github.com/Incipe-win/OpenStory/internal/project"
 	"github.com/Incipe-win/OpenStory/internal/workflow"
 )
 
 // WorkflowHandler handles workflow API endpoints.
 type WorkflowHandler struct {
 	repo     workflow.Repository
+	projects project.Repository
 	auditLog *audit.Logger
 	log      zerolog.Logger
 }
 
-func NewWorkflowHandler(repo workflow.Repository, auditLog *audit.Logger, log zerolog.Logger) *WorkflowHandler {
-	return &WorkflowHandler{repo: repo, auditLog: auditLog, log: log}
+func NewWorkflowHandler(repo workflow.Repository, projects project.Repository, auditLog *audit.Logger, log zerolog.Logger) *WorkflowHandler {
+	return &WorkflowHandler{repo: repo, projects: projects, auditLog: auditLog, log: log}
 }
 
 // ── Create ──────────────────────────────────────────
@@ -46,6 +48,10 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	}
 
 	userID := middleware.GetUserID(c)
+	if !h.canAccessProject(c, projectID, userID) {
+		return
+	}
+
 	wf := &workflow.Workflow{
 		ProjectID:   projectID,
 		UserID:      userID,
@@ -65,6 +71,35 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	})
 
 	Created(c, wf)
+}
+
+// ── ListByProject ───────────────────────────────────
+
+// ListByProject handles GET /api/projects/:id/workflows
+func (h *WorkflowHandler) ListByProject(c *gin.Context) {
+	projectID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid project id")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	if !h.canAccessProject(c, projectID, userID) {
+		return
+	}
+
+	page, pageSize := Pagination(c)
+	workflows, total, err := h.repo.ListByProject(c.Request.Context(), projectID, userID, page, pageSize)
+	if err != nil {
+		h.log.Error().Err(err).Msg("failed to list workflows")
+		InternalError(c, "internal error")
+		return
+	}
+
+	if workflows == nil {
+		workflows = []workflow.Workflow{}
+	}
+	OKWithMeta(c, workflows, Meta{Page: page, PageSize: pageSize, Total: total})
 }
 
 // ── Get ─────────────────────────────────────────────
@@ -319,4 +354,22 @@ func (h *WorkflowHandler) Snapshot(c *gin.Context) {
 	})
 
 	Created(c, version)
+}
+
+func (h *WorkflowHandler) canAccessProject(c *gin.Context, projectID, userID uuid.UUID) bool {
+	p, err := h.projects.GetProject(c.Request.Context(), projectID)
+	if err != nil {
+		if errors.Is(err, project.ErrProjectNotFound) {
+			NotFound(c, "project not found")
+			return false
+		}
+		h.log.Error().Err(err).Msg("failed to get project")
+		InternalError(c, "internal error")
+		return false
+	}
+	if p.UserID != userID {
+		NotFound(c, "project not found")
+		return false
+	}
+	return true
 }

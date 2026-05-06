@@ -4,6 +4,8 @@
 FROM node:22-alpine AS builder
 
 ARG NEXT_PUBLIC_API_URL
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
 
 # Use Aliyun Alpine mirror for any apk calls
@@ -11,8 +13,9 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
 
 WORKDIR /app
 
-# Use npmmirror for faster package downloads
-RUN npm config set registry https://registry.npmmirror.com
+# Configure npm proxy if set
+RUN if [ -n "$HTTP_PROXY" ]; then npm config set proxy "$HTTP_PROXY"; fi && \
+    if [ -n "$HTTPS_PROXY" ]; then npm config set https-proxy "$HTTPS_PROXY"; fi
 
 # Install dependencies first (cache layer)
 COPY package.json package-lock.json* ./

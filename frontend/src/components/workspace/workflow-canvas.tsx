@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -9,6 +9,8 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
+  applyEdgeChanges,
+  applyNodeChanges,
   type Connection,
   type Node,
   type Edge,
@@ -53,6 +55,16 @@ function toFlowNode(n: WorkflowNode): Node {
   };
 }
 
+function toFlowEdge(e: WorkflowEdge): Edge {
+  return {
+    id: e.id,
+    source: e.source_node_id,
+    target: e.target_node_id,
+    sourceHandle: e.source_handle,
+    targetHandle: e.target_handle,
+  };
+}
+
 function fromFlowNode(node: Node, existing: WorkflowNode | undefined): WorkflowNode {
   const data = node.data as { label?: string; nodeType?: NodeType; config?: Record<string, unknown> };
   return {
@@ -65,24 +77,32 @@ function fromFlowNode(node: Node, existing: WorkflowNode | undefined): WorkflowN
   };
 }
 
+function fromFlowEdge(edge: Edge): WorkflowEdge {
+  return {
+    id: edge.id,
+    source_node_id: edge.source,
+    target_node_id: edge.target,
+    source_handle: edge.sourceHandle || "",
+    target_handle: edge.targetHandle || "",
+  };
+}
+
 export function WorkflowCanvas() {
   const { nodes: storeNodes, edges: storeEdges, setNodes, setEdges, setSelectedNode, addNode } = useWorkspaceStore();
 
   const initialNodes = useMemo(() => storeNodes.map(toFlowNode), [storeNodes]);
-  const initialEdges = useMemo(
-    (): Edge[] =>
-      storeEdges.map((e) => ({
-        id: e.id,
-        source: e.source_node_id,
-        target: e.target_node_id,
-        sourceHandle: e.source_handle,
-        targetHandle: e.target_handle,
-      })),
-    [storeEdges]
-  );
+  const initialEdges = useMemo((): Edge[] => storeEdges.map(toFlowEdge), [storeEdges]);
 
-  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(initialNodes);
-  const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(initialEdges);
+  const [flowNodes, setFlowNodes] = useNodesState(initialNodes);
+  const [flowEdges, setFlowEdges] = useEdgesState(initialEdges);
+
+  useEffect(() => {
+    setFlowNodes(storeNodes.map(toFlowNode));
+  }, [setFlowNodes, storeNodes]);
+
+  useEffect(() => {
+    setFlowEdges(storeEdges.map(toFlowEdge));
+  }, [setFlowEdges, storeEdges]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -93,9 +113,10 @@ export function WorkflowCanvas() {
         source_handle: connection.sourceHandle || "",
         target_handle: connection.targetHandle || "",
       };
+      setFlowEdges((current) => addEdge(toFlowEdge(edge), current));
       setEdges([...storeEdges, edge]);
     },
-    [storeEdges, setEdges]
+    [setEdges, setFlowEdges, storeEdges]
   );
 
   const onNodeClick = useCallback(
@@ -140,20 +161,25 @@ export function WorkflowCanvas() {
   // Sync flow changes back to store
   const handleNodesChange: OnNodesChange = useCallback(
     (changes) => {
-      onNodesChange(changes);
-      // Convert and sync positions to store
-      const updatedNodes = flowNodes.map((n) => {
-        const change = changes.find((c) => "id" in c && c.id === n.id);
-        if (change && change.type === "position" && "position" in change && change.position) {
-          return { ...n, position: change.position };
-        }
-        return n;
+      setFlowNodes((current) => {
+        const updatedNodes = applyNodeChanges(changes, current);
+        const existingMap = new Map(storeNodes.map((n) => [n.id, n]));
+        setNodes(updatedNodes.map((n) => fromFlowNode(n, existingMap.get(n.id))));
+        return updatedNodes;
       });
-      const existingMap = new Map(storeNodes.map((n) => [n.id, n]));
-      const newStoreNodes = updatedNodes.map((n) => fromFlowNode(n, existingMap.get(n.id)));
-      useWorkspaceStore.getState().setNodes(newStoreNodes);
     },
-    [onNodesChange, flowNodes, storeNodes]
+    [setFlowNodes, setNodes, storeNodes]
+  );
+
+  const handleEdgesChange: OnEdgesChange = useCallback(
+    (changes) => {
+      setFlowEdges((current) => {
+        const updatedEdges = applyEdgeChanges(changes, current);
+        setEdges(updatedEdges.map(fromFlowEdge));
+        return updatedEdges;
+      });
+    },
+    [setEdges, setFlowEdges]
   );
 
   return (
@@ -162,7 +188,7 @@ export function WorkflowCanvas() {
         nodes={flowNodes}
         edges={flowEdges}
         onNodesChange={handleNodesChange}
-        onEdgesChange={onEdgesChange}
+        onEdgesChange={handleEdgesChange}
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}

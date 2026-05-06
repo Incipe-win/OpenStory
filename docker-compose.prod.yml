@@ -47,6 +47,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
     container_name: openstory-frontend
     environment:
       NODE_ENV: production
@@ -76,21 +79,19 @@ services:
 
   # ─── Database Migration ──────────────────────────────
   migrate:
-    image: golang:1.26-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
     container_name: openstory-migrate
-    entrypoint:
-      - "go"
-      - "run"
-      - "github.com/pressly/goose/v3/cmd/goose@latest"
-      - "-dir"
-      - "/migrations"
+    command:
       - "postgres"
       - "postgres://openstory:096ef151b8a7a96293ce002ee3025de5@postgres:5432/openstory?sslmode=disable"
       - "up"
-    environment:
-      GOPROXY: https://goproxy.cn,direct
-    volumes:
-      - ./migrations:/migrations:ro
     depends_on:
       postgres:
         condition: service_healthy

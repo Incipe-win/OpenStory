@@ -13,6 +13,9 @@ export const queryKeys = {
       ["projects", id, "assets", page] as const,
   },
   workflows: {
+    byProject: (projectId: string) => ["workflows", "project", projectId] as const,
+    listByProject: (projectId: string, page: number, pageSize: number) =>
+      ["workflows", "project", projectId, "list", { page, pageSize }] as const,
     detail: (id: string) => ["workflows", id] as const,
   },
   tasks: {

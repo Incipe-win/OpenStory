@@ -24,7 +24,7 @@ export default function LoginPage() {
         {/* Login card */}
         <div className="bg-card border border-border cyber-chamfer p-8 shadow-[var(--shadow-neon)]">
           <h2 className="text-sm font-mono uppercase tracking-[0.2em] text-muted-foreground mb-6">
-            // Authentication Required
+            {"// Authentication Required"}
           </h2>
           <LoginForm />
         </div>

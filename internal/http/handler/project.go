@@ -2,12 +2,14 @@ package handler
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"github.com/Incipe-win/OpenStory/internal/audit"
+	"github.com/Incipe-win/OpenStory/internal/auth"
 	"github.com/Incipe-win/OpenStory/internal/eventbus"
 	"github.com/Incipe-win/OpenStory/internal/http/middleware"
 	"github.com/Incipe-win/OpenStory/internal/project"
@@ -19,11 +21,12 @@ type ProjectHandler struct {
 	auditLog *audit.Logger
 	outbox   eventbus.EventBus
 	log      zerolog.Logger
+	jwt      *auth.JWTService
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(repo project.Repository, auditLog *audit.Logger, outbox eventbus.EventBus, log zerolog.Logger) *ProjectHandler {
-	return &ProjectHandler{repo: repo, auditLog: auditLog, outbox: outbox, log: log}
+func NewProjectHandler(repo project.Repository, auditLog *audit.Logger, outbox eventbus.EventBus, log zerolog.Logger, jwt *auth.JWTService) *ProjectHandler {
+	return &ProjectHandler{repo: repo, auditLog: auditLog, outbox: outbox, log: log, jwt: jwt}
 }
 
 type createProjectRequest struct {
@@ -182,6 +185,49 @@ func (h *ProjectHandler) PublishWork(c *gin.Context) {
 			}).WithUser(userID))
 	}
 	OK(c, work)
+}
+
+// GetWork handles GET /api/works/:id.
+func (h *ProjectHandler) GetWork(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid work id")
+		return
+	}
+
+	work, err := h.repo.GetWork(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, project.ErrWorkNotFound) {
+			NotFound(c, "work not found")
+			return
+		}
+		h.log.Error().Err(err).Msg("failed to get published work")
+		InternalError(c, "internal error")
+		return
+	}
+
+	if work.Status != "published" && !h.canViewPrivateWork(c, work) {
+		NotFound(c, "work not found")
+		return
+	}
+
+	OK(c, work)
+}
+
+func (h *ProjectHandler) canViewPrivateWork(c *gin.Context, work *project.Work) bool {
+	if h.jwt == nil {
+		return false
+	}
+	header := c.GetHeader("Authorization")
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return false
+	}
+	claims, err := h.jwt.ValidateAccessToken(parts[1])
+	if err != nil {
+		return false
+	}
+	return claims.Role == "admin" || claims.UserID == work.UserID
 }
 
 // Feed handles GET /api/feed (public, no auth required).

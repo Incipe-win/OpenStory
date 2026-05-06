@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useProject } from "@/lib/hooks/use-projects";
 import { useProjectTasks } from "@/lib/hooks/use-tasks";
 import { useProjectAssets } from "@/lib/hooks/use-assets";
+import { useProjectWorkflows } from "@/lib/hooks/use-workflows";
 import { PageContainer } from "@/components/layout/page-container";
 import { Topbar } from "@/components/layout/topbar";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 import { WorkflowCard } from "@/components/workflow/workflow-card";
 import { CreateWorkflowDialog } from "@/components/workflow/create-workflow-dialog";
+import { AssetUploadDialog } from "@/components/assets/asset-upload-dialog";
 import { CyberButton } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { TaskDetailDialog } from "@/components/tasks/task-detail-dialog";
@@ -26,6 +28,7 @@ import {
   ListTodo,
   FolderOpen,
   Play,
+  Upload,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
 
@@ -38,10 +41,18 @@ export default function ProjectDetailPage({
   const { data: project, isLoading, isError, refetch } = useProject(id);
   const [activeTab, setActiveTab] = useState("workflows");
   const [workflowDialogOpen, setWorkflowDialogOpen] = useState(false);
+  const [assetUploadOpen, setAssetUploadOpen] = useState(false);
+  const [workflowPage, setWorkflowPage] = useState(1);
   const [taskPage, setTaskPage] = useState(1);
   const [assetPage, setAssetPage] = useState(1);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
+  const {
+    data: workflowsData,
+    isLoading: workflowsLoading,
+    isError: workflowsError,
+    refetch: refetchWorkflows,
+  } = useProjectWorkflows(id, workflowPage);
   const { data: tasksData } = useProjectTasks(id, taskPage);
   const { data: assetsData } = useProjectAssets(id, assetPage);
 
@@ -91,7 +102,7 @@ export default function ProjectDetailPage({
         <ProjectTabs
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          workflowCount={project.status === "draft" ? undefined : undefined}
+          workflowCount={workflowsData?.meta.total}
           taskCount={tasksData?.meta.total}
           assetCount={assetsData?.meta.total}
         />
@@ -114,13 +125,38 @@ export default function ProjectDetailPage({
                 </CyberButton>
               </div>
 
-              <EmptyState
-                title="No workflows yet"
-                description="Create a workflow to define your content generation pipeline"
-                actionLabel="Create Workflow"
-                onAction={() => setWorkflowDialogOpen(true)}
-                icon={<Workflow className="h-12 w-12" />}
-              />
+              {workflowsLoading && <LoadingState message="Loading workflows..." />}
+              {workflowsError && (
+                <ErrorState
+                  onRetry={() => refetchWorkflows()}
+                  message="Failed to load workflows"
+                />
+              )}
+              {workflowsData && workflowsData.data.length === 0 && (
+                <EmptyState
+                  title="No workflows yet"
+                  description="Create a workflow to define your content generation pipeline"
+                  actionLabel="Create Workflow"
+                  onAction={() => setWorkflowDialogOpen(true)}
+                  icon={<Workflow className="h-12 w-12" />}
+                />
+              )}
+              {workflowsData && workflowsData.data.length > 0 && (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {workflowsData.data.map((workflow) => (
+                      <WorkflowCard key={workflow.id} workflow={workflow} />
+                    ))}
+                  </div>
+                  <Pagination
+                    page={workflowsData.meta.page}
+                    pageSize={workflowsData.meta.page_size}
+                    total={workflowsData.meta.total}
+                    onPageChange={setWorkflowPage}
+                    className="mt-4"
+                  />
+                </>
+              )}
             </div>
           )}
 
@@ -177,6 +213,17 @@ export default function ProjectDetailPage({
           {/* Assets Tab */}
           {activeTab === "assets" && (
             <div>
+              <div className="flex items-center justify-end mb-6">
+                <CyberButton
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAssetUploadOpen(true)}
+                >
+                  <Upload className="h-4 w-4 mr-1" />
+                  Upload Asset
+                </CyberButton>
+              </div>
+
               {assetsData && assetsData.data.length > 0 ? (
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -206,6 +253,12 @@ export default function ProjectDetailPage({
         <CreateWorkflowDialog
           open={workflowDialogOpen}
           onClose={() => setWorkflowDialogOpen(false)}
+          projectId={id}
+        />
+
+        <AssetUploadDialog
+          open={assetUploadOpen}
+          onClose={() => setAssetUploadOpen(false)}
           projectId={id}
         />
 

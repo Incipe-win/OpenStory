@@ -45,7 +45,7 @@ const CyberInput = forwardRef<HTMLInputElement, CyberInputProps>(
         </div>
         {error && (
           <p className="mt-1.5 text-xs text-destructive font-mono">
-            // {error}
+            {`// ${error}`}
           </p>
         )}
       </div>

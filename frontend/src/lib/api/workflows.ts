@@ -1,15 +1,36 @@
 import apiClient from "@/lib/api-client";
-import type { ApiResponse } from "@/lib/types/api";
+import type { ApiResponse, PaginatedResponse } from "@/lib/types/api";
 import type {
   Workflow,
   WorkflowDetail,
+  WorkflowNode,
+  WorkflowEdge,
   CreateWorkflowInput,
   UpdateWorkflowInput,
   ValidateResult,
   WorkflowVersion,
 } from "@/lib/types/workflow";
 
+type FlatWorkflowDetail = Workflow & {
+  nodes?: WorkflowNode[];
+  edges?: WorkflowEdge[];
+};
+
+function normalizeWorkflowDetail(detail: WorkflowDetail | FlatWorkflowDetail): WorkflowDetail {
+  if ("workflow" in detail) return detail;
+
+  const { nodes = [], edges = [], ...workflow } = detail;
+  return { workflow, nodes, edges };
+}
+
 export const workflowsApi = {
+  listByProject: (projectId: string, page = 1, pageSize = 20) =>
+    apiClient
+      .get<PaginatedResponse<Workflow>>(`/api/projects/${projectId}/workflows`, {
+        params: { page, page_size: pageSize },
+      })
+      .then((r) => r.data),
+
   create: (projectId: string, input: CreateWorkflowInput) =>
     apiClient
       .post<ApiResponse<Workflow>>(`/api/projects/${projectId}/workflows`, input)
@@ -17,13 +38,13 @@ export const workflowsApi = {
 
   get: (id: string) =>
     apiClient
-      .get<ApiResponse<WorkflowDetail>>(`/api/workflows/${id}`)
-      .then((r) => r.data.data),
+      .get<ApiResponse<WorkflowDetail | FlatWorkflowDetail>>(`/api/workflows/${id}`)
+      .then((r) => normalizeWorkflowDetail(r.data.data)),
 
   update: (id: string, input: UpdateWorkflowInput) =>
     apiClient
-      .put<ApiResponse<WorkflowDetail>>(`/api/workflows/${id}`, input)
-      .then((r) => r.data.data),
+      .put<ApiResponse<WorkflowDetail | FlatWorkflowDetail>>(`/api/workflows/${id}`, input)
+      .then((r) => normalizeWorkflowDetail(r.data.data)),
 
   validate: (id: string) =>
     apiClient

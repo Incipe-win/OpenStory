@@ -1,6 +1,7 @@
 import apiClient from "@/lib/api-client";
 import type { ApiResponse, PaginatedResponse } from "@/lib/types/api";
-import type { Asset, UploadUrlResponse, UploadUrlInput, ComposeInput, ComposeResult } from "@/lib/types/asset";
+import type { Asset, UploadUrlResponse, UploadUrlInput, ComposeInput } from "@/lib/types/asset";
+import type { GenerationTask } from "@/lib/types/task";
 
 export const assetsApi = {
   getUploadUrl: (input: UploadUrlInput) =>
@@ -20,11 +21,11 @@ export const assetsApi = {
 
   compose: (projectId: string, input: ComposeInput) =>
     apiClient
-      .post<ApiResponse<ComposeResult>>(`/api/projects/${projectId}/compose`, input)
+      .post<ApiResponse<GenerationTask>>(`/api/projects/${projectId}/compose`, input)
       .then((r) => r.data.data),
 
   getComposeStatus: (taskId: string) =>
     apiClient
-      .get<ApiResponse<ComposeResult>>(`/api/compose/${taskId}`)
+      .get<ApiResponse<GenerationTask>>(`/api/compose/${taskId}`)
       .then((r) => r.data.data),
 };

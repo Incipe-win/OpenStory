@@ -1,26 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useWorkspaceStore } from "@/lib/stores/workspace-store";
 import { getNodeDef } from "@/lib/utils/nodes";
 import { CyberInput } from "@/components/ui/input";
 import { CyberButton } from "@/components/ui/button";
 import { X, Save } from "lucide-react";
+import type { WorkflowNode } from "@/lib/types/workflow";
 
 export function PropertyPanel() {
   const { selectedNodeId, nodes, updateNodeName, updateNodeConfig, setSelectedNode } =
     useWorkspaceStore();
 
   const node = nodes.find((n) => n.id === selectedNodeId);
-  const [name, setName] = useState(node?.name || "");
-  const [configJson, setConfigJson] = useState("");
-
-  useEffect(() => {
-    if (node) {
-      setName(node.name);
-      setConfigJson(JSON.stringify(node.config, null, 2));
-    }
-  }, [node?.id]);
 
   if (!node) {
     return (
@@ -34,14 +26,39 @@ export function PropertyPanel() {
     );
   }
 
+  return (
+    <PropertyEditor
+      key={node.id}
+      node={node}
+      onSave={(name, config) => {
+        updateNodeName(node.id, name);
+        updateNodeConfig(node.id, config);
+      }}
+      onClose={() => setSelectedNode(null)}
+    />
+  );
+}
+
+function PropertyEditor({
+  node,
+  onSave,
+  onClose,
+}: {
+  node: WorkflowNode;
+  onSave: (name: string, config: Record<string, unknown>) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(node.name);
+  const [configJson, setConfigJson] = useState(() =>
+    JSON.stringify(node.config, null, 2)
+  );
   const def = getNodeDef(node.type);
   const Icon = def.icon;
 
   const handleSave = () => {
-    updateNodeName(node.id, name);
     try {
       const config = JSON.parse(configJson);
-      updateNodeConfig(node.id, config);
+      onSave(name, config);
     } catch {
       // Keep current config if JSON is invalid
     }
@@ -58,7 +75,7 @@ export function PropertyPanel() {
           </span>
         </div>
         <button
-          onClick={() => setSelectedNode(null)}
+          onClick={onClose}
           className="text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
         >
           <X className="h-4 w-4" />

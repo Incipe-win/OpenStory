@@ -69,8 +69,8 @@ func New(deps Deps) *gin.Engine {
 
 	// ── Handlers ─────────────────────────────────────
 	authH := handler.NewAuthHandler(authRepo, jwtSvc, auditLog, deps.Log)
-	projH := handler.NewProjectHandler(projRepo, auditLog, outboxWriter, deps.Log)
-	wfH := handler.NewWorkflowHandler(wfRepo, auditLog, deps.Log)
+	projH := handler.NewProjectHandler(projRepo, auditLog, outboxWriter, deps.Log, jwtSvc)
+	wfH := handler.NewWorkflowHandler(wfRepo, projRepo, auditLog, deps.Log)
 	taskH := handler.NewTaskHandler(taskRepo, deps.AsynqClient, auditLog, billingSvc, outboxWriter, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	assetH := handler.NewAssetHandler(assetRepo, assetStorage, projRepo, taskRepo, deps.AsynqClient, auditLog, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	billingH := handler.NewBillingHandler(billingSvc, deps.Log)
@@ -89,6 +89,7 @@ func New(deps Deps) *gin.Engine {
 
 		// Public feed
 		api.GET("/feed", projH.Feed)
+		api.GET("/works/:id", projH.GetWork)
 	}
 
 	// ── Authenticated routes ─────────────────────────
@@ -106,6 +107,7 @@ func New(deps Deps) *gin.Engine {
 			projects.GET("/:id", projH.Get)
 			projects.PATCH("/:id", projH.Update)
 			projects.POST("/:id/workflows", wfH.Create)
+			projects.GET("/:id/workflows", wfH.ListByProject)
 			projects.GET("/:id/tasks", taskH.ListByProject)
 			projects.GET("/:id/assets", assetH.ListByProject)
 			projects.POST("/:id/compose", assetH.Compose)

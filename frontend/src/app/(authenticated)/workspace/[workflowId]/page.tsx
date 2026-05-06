@@ -31,7 +31,7 @@ export default function WorkspacePage({
     return () => {
       reset();
     };
-  }, [data?.workflow?.id]);
+  }, [data, setEdges, setNodes, reset]);
 
   if (isLoading) return <LoadingState message="Loading workflow..." />;
   if (isError || !data)

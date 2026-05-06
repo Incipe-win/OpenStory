@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const publicPaths = ["/login", "/feed"];
+const publicPaths = ["/login", "/feed", "/works"];
 const authPath = "/login";
 
 export function middleware(request: NextRequest) {

@@ -4,12 +4,21 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { workflowsApi } from "@/lib/api/workflows";
 import { queryKeys } from "@/lib/hooks/query-keys";
 import type { CreateWorkflowInput, UpdateWorkflowInput } from "@/lib/types/workflow";
+import { PAGE_SIZE_DEFAULT } from "@/lib/config";
 
 export function useWorkflow(id: string) {
   return useQuery({
     queryKey: queryKeys.workflows.detail(id),
     queryFn: () => workflowsApi.get(id),
     enabled: !!id,
+  });
+}
+
+export function useProjectWorkflows(projectId: string, page = 1) {
+  return useQuery({
+    queryKey: queryKeys.workflows.listByProject(projectId, page, PAGE_SIZE_DEFAULT),
+    queryFn: () => workflowsApi.listByProject(projectId, page, PAGE_SIZE_DEFAULT),
+    enabled: !!projectId,
   });
 }
 
@@ -25,6 +34,9 @@ export function useCreateWorkflow() {
     onSuccess: (_, { projectId }) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.projects.detail(projectId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.workflows.byProject(projectId),
       });
     },
   });

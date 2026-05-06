@@ -72,3 +72,26 @@ COPY --from=builder /bin/consumer /usr/local/bin/consumer
 
 EXPOSE 9090
 ENTRYPOINT ["consumer"]
+
+# ============================================================
+# Stage 6: Build migration tool
+# ============================================================
+FROM golang:1.26-alpine AS goose-builder
+
+ENV GOPROXY=https://goproxy.cn,direct
+
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
+RUN apk add --no-cache git
+RUN go install github.com/pressly/goose/v3/cmd/goose@latest
+
+# ============================================================
+# Stage 7: Database migration runtime
+# ============================================================
+FROM alpine:3.21 AS migrate
+
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
+RUN apk add --no-cache ca-certificates-bundle
+COPY --from=goose-builder /go/bin/goose /usr/local/bin/goose
+COPY migrations /migrations
+
+ENTRYPOINT ["goose", "-dir", "/migrations"]

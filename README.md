@@ -448,6 +448,7 @@ docker compose -f docker-compose.prod.yml up -d
 | GET | `/api/projects/:id` | ✅ | 项目详情 |
 | PATCH | `/api/projects/:id` | ✅ | 更新项目 |
 | POST | `/api/projects/:id/workflows` | ✅ | 创建工作流 |
+| GET | `/api/projects/:id/workflows` | ✅ | 项目工作流列表 (分页) |
 | GET | `/api/workflows/:id` | ✅ | 获取工作流 (含节点和边) |
 | PUT | `/api/workflows/:id` | ✅ | 更新工作流 (DAG 校验) |
 | POST | `/api/workflows/:id/validate` | ✅ | 验证 DAG + 拓扑排序 |
@@ -462,6 +463,7 @@ docker compose -f docker-compose.prod.yml up -d
 | GET | `/api/projects/:id/assets` | ✅ | 获取项目素材列表 |
 | POST | `/api/projects/:id/compose` | ✅ | 创建 FFmpeg 多图片合成 MP4 任务 |
 | GET | `/api/compose/:taskId` | ✅ | 获取合成任务状态和输出 |
+| GET | `/api/works/:id` | — / 可选 | 获取作品详情 (公开作品免登录，作者/admin 可查看非公开作品) |
 | POST | `/api/works/:id/publish` | ✅ | 提交作品进入审核 |
 | GET | `/api/admin/moderation` | ✅ admin | 审核记录列表 |
 | POST | `/api/admin/works/:id/review` | ✅ admin | 管理员审核作品 |

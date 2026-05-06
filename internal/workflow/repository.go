@@ -18,6 +18,7 @@ var (
 // Repository defines workflow database operations.
 type Repository interface {
 	Create(ctx context.Context, wf *Workflow) error
+	ListByProject(ctx context.Context, projectID, userID uuid.UUID, page, pageSize int) ([]Workflow, int, error)
 	GetDetail(ctx context.Context, id uuid.UUID) (*WorkflowDetail, error)
 	Update(ctx context.Context, wf *Workflow, nodes []Node, edges []Edge) error
 	CreateSnapshot(ctx context.Context, workflowID, userID uuid.UUID) (*Version, error)
@@ -39,6 +40,40 @@ func (r *PgRepository) Create(ctx context.Context, wf *Workflow) error {
 		 RETURNING id, status, current_version, created_at, updated_at`,
 		wf.ProjectID, wf.UserID, wf.Name, wf.Description,
 	).Scan(&wf.ID, &wf.Status, &wf.CurrentVersion, &wf.CreatedAt, &wf.UpdatedAt)
+}
+
+func (r *PgRepository) ListByProject(ctx context.Context, projectID, userID uuid.UUID, page, pageSize int) ([]Workflow, int, error) {
+	var total int
+	if err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM workflows WHERE project_id = $1 AND user_id = $2`,
+		projectID, userID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count workflows: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, project_id, user_id, name, description, status, current_version, created_at, updated_at
+		 FROM workflows
+		 WHERE project_id = $1 AND user_id = $2
+		 ORDER BY created_at DESC
+		 LIMIT $3 OFFSET $4`,
+		projectID, userID, pageSize, (page-1)*pageSize,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list workflows: %w", err)
+	}
+	defer rows.Close()
+
+	var workflows []Workflow
+	for rows.Next() {
+		var wf Workflow
+		if err := rows.Scan(&wf.ID, &wf.ProjectID, &wf.UserID, &wf.Name, &wf.Description,
+			&wf.Status, &wf.CurrentVersion, &wf.CreatedAt, &wf.UpdatedAt); err != nil {
+			return nil, 0, fmt.Errorf("scan workflow: %w", err)
+		}
+		workflows = append(workflows, wf)
+	}
+	return workflows, total, nil
 }
 
 func (r *PgRepository) GetDetail(ctx context.Context, id uuid.UUID) (*WorkflowDetail, error) {

@@ -68,7 +68,7 @@ function TaskContent({ task, events }: { task: GenerationTask; events?: { id: st
       {/* Input */}
       <div>
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
-          // Input
+          {"// Input"}
         </p>
         <pre className="bg-input border border-border p-3 cyber-chamfer-xs text-xs font-mono text-foreground overflow-auto max-h-32">
           {JSON.stringify(task.input ?? {}, null, 2)}
@@ -79,7 +79,7 @@ function TaskContent({ task, events }: { task: GenerationTask; events?: { id: st
       {task.output && (
         <div>
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
-            // Output
+            {"// Output"}
           </p>
           <pre className="bg-input border border-border p-3 cyber-chamfer-xs text-xs font-mono text-accent overflow-auto max-h-48">
             {JSON.stringify(task.output ?? {}, null, 2)}
@@ -91,7 +91,7 @@ function TaskContent({ task, events }: { task: GenerationTask; events?: { id: st
       {task.error_message && (
         <div>
           <p className="text-xs font-mono uppercase tracking-wider text-destructive mb-2">
-            // Error
+            {"// Error"}
           </p>
           <pre className="bg-destructive/5 border border-destructive/30 p-3 cyber-chamfer-xs text-xs font-mono text-destructive overflow-auto max-h-32">
             {task.error_message}
@@ -103,7 +103,7 @@ function TaskContent({ task, events }: { task: GenerationTask; events?: { id: st
       {events && events.length > 0 && (
         <div>
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-2">
-            // Event Timeline
+            {"// Event Timeline"}
           </p>
           <div className="space-y-1">
             {events.map((event) => (

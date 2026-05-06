@@ -1,6 +1,5 @@
 import apiClient from "@/lib/api-client";
-import type { ApiResponse, PaginatedResponse } from "@/lib/types/api";
-import type { Work } from "@/lib/types/work";
+import type { ApiResponse } from "@/lib/types/api";
 
 export interface ModerationRecord {
   id: string;
@@ -32,6 +31,6 @@ export const adminApi = {
 
   reviewWork: (workId: string, input: ReviewInput) =>
     apiClient
-      .post<ApiResponse<Work>>(`/api/admin/works/${workId}/review`, input)
+      .post<ApiResponse<ModerationRecord>>(`/api/admin/works/${workId}/review`, input)
       .then((r) => r.data.data),
 };

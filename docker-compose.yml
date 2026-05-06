@@ -83,6 +83,26 @@ services:
         echo 'Bucket openstory created'
       "
 
+  # ─── Database Migration ───────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+      network: host
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+    container_name: openstory-migrate
+    command:
+      - "postgres"
+      - "postgres://openstory:openstory@postgres:5432/openstory?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   # ─── API Server ────────────────────────────────────
   api:
     build:
@@ -122,6 +142,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -168,6 +190,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -199,6 +223,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -230,6 +256,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -260,6 +288,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -290,6 +320,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -320,6 +352,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -350,6 +384,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

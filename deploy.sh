@@ -42,8 +42,19 @@ preflight() {
         exit 1
     fi
 
-    if grep -q "YOUR_SERVER_IP" "$ENV_FILE"; then
-        err "MINIO_PUBLIC_ENDPOINT in $ENV_FILE is not set. Edit $ENV_FILE and set it to http://<your-server-ip>:9000"
+    local minio_public_endpoint
+    minio_public_endpoint="$(
+        awk -F= '/^[[:space:]]*MINIO_PUBLIC_ENDPOINT[[:space:]]*=/ {
+            value=$0
+            sub(/^[[:space:]]*MINIO_PUBLIC_ENDPOINT[[:space:]]*=/, "", value)
+            print value
+        }' "$ENV_FILE" | tail -n 1
+    )"
+
+    if [ -z "$minio_public_endpoint" ] ||
+       [[ "$minio_public_endpoint" == *"YOUR_SERVER_IP"* ]] ||
+       [[ "$minio_public_endpoint" == *"YOUR_DOMAIN"* ]]; then
+        err "MINIO_PUBLIC_ENDPOINT in $ENV_FILE is not set. Edit $ENV_FILE and set it to https://incipe.top"
         exit 1
     fi
 
@@ -59,6 +70,8 @@ build() {
 
 # ─── Start services ────────────────────────────────────
 start() {
+    # Remove stale one-shot containers to prevent dependency deadlock
+    docker compose -f "$COMPOSE_FILE" rm -f migrate minio-init 2>/dev/null || true
     log "Starting services..."
     docker compose -f "$COMPOSE_FILE" up -d
     log "All services started"

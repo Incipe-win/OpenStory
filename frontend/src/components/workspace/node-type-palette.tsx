@@ -12,7 +12,7 @@ export function NodeTypePalette() {
   return (
     <div className="w-52 bg-card border-r border-border p-3 overflow-y-auto">
       <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3 px-1">
-        // Node Types
+        {"// Node Types"}
       </p>
       <div className="space-y-1">
         {NODE_PALETTE.map((type) => {
