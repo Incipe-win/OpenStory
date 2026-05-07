@@ -282,7 +282,7 @@ func TestUnifiedErrorResponse(t *testing.T) {
 
 	r := gin.New()
 	auditLog := &audit.Logger{} // nil pool, won't be used
-	projH := handler.NewProjectHandler(nil, auditLog, nil, zerolog.Nop(), nil)
+	projH := handler.NewProjectHandler(nil, auditLog, nil, nil, zerolog.Nop(), nil)
 
 	r.GET("/projects/:id", projH.Get)
 

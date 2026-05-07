@@ -33,4 +33,9 @@ export const adminApi = {
     apiClient
       .post<ApiResponse<ModerationRecord>>(`/api/admin/works/${workId}/review`, input)
       .then((r) => r.data.data),
+
+  reviewAsset: (assetId: string, input: ReviewInput) =>
+    apiClient
+      .post<ApiResponse<ModerationRecord>>(`/api/admin/assets/${assetId}/review`, input)
+      .then((r) => r.data.data),
 };

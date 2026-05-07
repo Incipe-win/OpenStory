@@ -11,14 +11,17 @@ interface StatusBadgeProps {
 const statusStyles: Record<string, string> = {
   draft: "bg-muted text-muted-foreground border-muted",
   pending: "bg-muted text-muted-foreground border-muted",
+  pending_review: "bg-yellow-500/10 text-yellow-300 border-yellow-500/40",
   queued: "bg-accent-tertiary/10 text-accent-tertiary border-accent-tertiary/30",
   validated: "bg-yellow-500/10 text-yellow-300 border-yellow-500/40",
   published: "bg-accent/15 text-accent border-accent/50",
+  approved: "bg-accent/15 text-accent border-accent/50",
   active: "bg-accent/15 text-accent border-accent/50",
   running:
     "bg-accent/10 text-accent border-accent/30 animate-[pulse_2s_ease-in-out_infinite]",
   succeeded: "bg-accent/15 text-accent border-accent/50",
   failed: "bg-destructive/10 text-destructive border-destructive/30",
+  rejected: "bg-destructive/10 text-destructive border-destructive/30",
   canceled: "bg-muted text-muted-foreground border-muted line-through",
 };
 

@@ -21,22 +21,30 @@ import (
 
 type Storage struct {
 	client        *minio.Client
+	publicClient  *minio.Client
 	bucket        string
 	publicBaseURL string
 }
 
 func NewStorage(cfg config.MinIOConfig) (*Storage, error) {
+	region := storageRegion(cfg.Region)
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
 		Secure: cfg.UseSSL,
-		Region: cfg.Region,
+		Region: region,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create minio client: %w", err)
 	}
 	s := &Storage{client: client, bucket: cfg.Bucket}
 	if cfg.PublicEndpoint != "" {
-		s.publicBaseURL = strings.TrimRight(cfg.PublicEndpoint, "/") + "/" + cfg.Bucket
+		publicEndpoint := strings.TrimRight(cfg.PublicEndpoint, "/")
+		s.publicBaseURL = publicEndpoint + "/" + cfg.Bucket
+		publicClient, err := newPublicPresignClient(publicEndpoint, cfg)
+		if err != nil {
+			return nil, err
+		}
+		s.publicClient = publicClient
 	}
 	return s, nil
 }
@@ -52,19 +60,65 @@ func (s *Storage) PresignedPutURL(ctx context.Context, key, contentType string, 
 	if expiry <= 0 {
 		expiry = 15 * time.Minute
 	}
-	u, err := s.client.PresignedPutObject(ctx, s.bucket, key, expiry)
+	client := s.client
+	if s.publicClient != nil {
+		client = s.publicClient
+	}
+	u, err := client.PresignedPutObject(ctx, s.bucket, key, expiry)
 	if err != nil {
 		return nil, err
 	}
-	if s.publicBaseURL != "" {
-		u.Path = "/" + s.bucket + "/" + key
-		u.Host = ""
-		u, err = url.Parse(s.publicBaseURL + "/" + key + "?" + u.RawQuery)
-		if err != nil {
-			return nil, err
+	return u, nil
+}
+
+// ResolveObjectURL converts an internal s3:// asset location into a browser-safe URL.
+// It preserves existing http(s) URLs, signs private MinIO/S3 objects when possible,
+// and falls back to the configured public object prefix for public buckets/proxies.
+func (s *Storage) ResolveObjectURL(ctx context.Context, rawURL, bucket, key string, expiry time.Duration) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" && key == "" {
+		return "", nil
+	}
+	if isHTTPURL(rawURL) {
+		return rawURL, nil
+	}
+	if parsedBucket, parsedKey, ok := parseObjectURL(rawURL); ok {
+		if bucket == "" {
+			bucket = parsedBucket
+		}
+		if key == "" {
+			key = parsedKey
 		}
 	}
-	return u, nil
+	if key == "" {
+		return rawURL, nil
+	}
+	if expiry <= 0 {
+		expiry = 15 * time.Minute
+	}
+	if s == nil || s.client == nil {
+		return "", fmt.Errorf("object storage is not configured")
+	}
+	if bucket == "" {
+		bucket = s.bucket
+	}
+	client := s.client
+	if s.publicClient != nil {
+		client = s.publicClient
+	}
+	if client != nil {
+		u, err := client.PresignedGetObject(ctx, bucket, key, expiry, url.Values{})
+		if err == nil {
+			return u.String(), nil
+		}
+		if s.publicBaseURL == "" {
+			return "", err
+		}
+	}
+	if s.publicBaseURL != "" {
+		return s.publicBaseURL + "/" + strings.TrimLeft(key, "/"), nil
+	}
+	return rawURL, nil
 }
 
 func (s *Storage) FGetObject(ctx context.Context, key, filePath string) error {
@@ -83,6 +137,47 @@ func (s *Storage) FPutObject(ctx context.Context, key, filePath, contentType str
 
 func ObjectURL(bucket, key string) string {
 	return "s3://" + bucket + "/" + key
+}
+
+func newPublicPresignClient(publicEndpoint string, cfg config.MinIOConfig) (*minio.Client, error) {
+	u, err := url.Parse(publicEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("parse MINIO_PUBLIC_ENDPOINT: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("MINIO_PUBLIC_ENDPOINT must start with http:// or https://")
+	}
+	if u.Host == "" {
+		return nil, fmt.Errorf("MINIO_PUBLIC_ENDPOINT must include a host")
+	}
+	return minio.New(u.Host, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Secure: u.Scheme == "https",
+		Region: storageRegion(cfg.Region),
+	})
+}
+
+func storageRegion(region string) string {
+	if region == "" {
+		return "us-east-1"
+	}
+	return region
+}
+
+func isHTTPURL(rawURL string) bool {
+	return strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://")
+}
+
+func parseObjectURL(rawURL string) (string, string, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "s3" || u.Host == "" {
+		return "", "", false
+	}
+	key := strings.TrimLeft(u.Path, "/")
+	if key == "" {
+		return "", "", false
+	}
+	return u.Host, key, true
 }
 
 func BuildStorageKey(projectID, assetID, name string) string {

@@ -3,11 +3,13 @@ package handler
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"github.com/Incipe-win/OpenStory/internal/asset"
 	"github.com/Incipe-win/OpenStory/internal/audit"
 	"github.com/Incipe-win/OpenStory/internal/auth"
 	"github.com/Incipe-win/OpenStory/internal/eventbus"
@@ -20,14 +22,17 @@ type ProjectHandler struct {
 	repo     project.Repository
 	auditLog *audit.Logger
 	outbox   eventbus.EventBus
+	storage  *asset.Storage
 	log      zerolog.Logger
 	jwt      *auth.JWTService
 }
 
 // NewProjectHandler creates a new ProjectHandler.
-func NewProjectHandler(repo project.Repository, auditLog *audit.Logger, outbox eventbus.EventBus, log zerolog.Logger, jwt *auth.JWTService) *ProjectHandler {
-	return &ProjectHandler{repo: repo, auditLog: auditLog, outbox: outbox, log: log, jwt: jwt}
+func NewProjectHandler(repo project.Repository, auditLog *audit.Logger, outbox eventbus.EventBus, storage *asset.Storage, log zerolog.Logger, jwt *auth.JWTService) *ProjectHandler {
+	return &ProjectHandler{repo: repo, auditLog: auditLog, outbox: outbox, storage: storage, log: log, jwt: jwt}
 }
+
+const workReadURLExpiry = time.Hour
 
 type createProjectRequest struct {
 	Name        string `json:"name"        binding:"required,min=1,max=255"`
@@ -184,7 +189,7 @@ func (h *ProjectHandler) PublishWork(c *gin.Context) {
 				"status":     work.Status,
 			}).WithUser(userID))
 	}
-	OK(c, work)
+	OK(c, h.presentWork(c, work))
 }
 
 // GetWork handles GET /api/works/:id.
@@ -211,7 +216,7 @@ func (h *ProjectHandler) GetWork(c *gin.Context) {
 		return
 	}
 
-	OK(c, work)
+	OK(c, h.presentWork(c, work))
 }
 
 func (h *ProjectHandler) canViewPrivateWork(c *gin.Context, work *project.Work) bool {
@@ -244,5 +249,41 @@ func (h *ProjectHandler) Feed(c *gin.Context) {
 	if works == nil {
 		works = []project.Work{}
 	}
-	OKWithMeta(c, works, Meta{Page: page, PageSize: pageSize, Total: total})
+	OKWithMeta(c, h.presentWorks(c, works), Meta{Page: page, PageSize: pageSize, Total: total})
+}
+
+func (h *ProjectHandler) presentWorks(c *gin.Context, works []project.Work) []project.Work {
+	out := make([]project.Work, len(works))
+	for i := range works {
+		out[i] = h.presentWork(c, &works[i])
+	}
+	return out
+}
+
+func (h *ProjectHandler) presentWork(c *gin.Context, work *project.Work) project.Work {
+	if work == nil {
+		return project.Work{}
+	}
+	out := *work
+	h.resolveWorkURL(c, &out.FileURL, out.ID, "file_url")
+	h.resolveWorkURL(c, &out.ThumbnailURL, out.ID, "thumbnail_url")
+	return out
+}
+
+func (h *ProjectHandler) resolveWorkURL(c *gin.Context, target *string, workID uuid.UUID, field string) {
+	if h.storage == nil || target == nil || *target == "" {
+		return
+	}
+	resolved, err := h.storage.ResolveObjectURL(c.Request.Context(), *target, "", "", workReadURLExpiry)
+	if err != nil {
+		h.log.Warn().
+			Err(err).
+			Str("work_id", workID.String()).
+			Str("field", field).
+			Msg("failed to resolve work object url")
+		return
+	}
+	if resolved != "" {
+		*target = resolved
+	}
 }

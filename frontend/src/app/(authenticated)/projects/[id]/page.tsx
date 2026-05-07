@@ -4,7 +4,7 @@ import { useState, use } from "react";
 import Link from "next/link";
 import { useProject } from "@/lib/hooks/use-projects";
 import { useProjectTasks } from "@/lib/hooks/use-tasks";
-import { useProjectAssets } from "@/lib/hooks/use-assets";
+import { useProjectAssets, useSubmitAssetToFeed } from "@/lib/hooks/use-assets";
 import { useProjectWorkflows } from "@/lib/hooks/use-workflows";
 import { PageContainer } from "@/components/layout/page-container";
 import { Topbar } from "@/components/layout/topbar";
@@ -12,8 +12,10 @@ import { ProjectTabs } from "@/components/projects/project-tabs";
 import { WorkflowCard } from "@/components/workflow/workflow-card";
 import { CreateWorkflowDialog } from "@/components/workflow/create-workflow-dialog";
 import { AssetUploadDialog } from "@/components/assets/asset-upload-dialog";
+import { AssetPreview } from "@/components/assets/asset-preview";
 import { CyberButton } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { useToast } from "@/components/ui/toast";
 import { TaskDetailDialog } from "@/components/tasks/task-detail-dialog";
 import { AssetCard } from "@/components/assets/asset-card";
 import { LoadingState } from "@/components/shared/loading-state";
@@ -31,6 +33,8 @@ import {
   Upload,
 } from "lucide-react";
 import { formatDate } from "@/lib/utils/format";
+import { apiErrorMessage } from "@/lib/api-errors";
+import type { Asset } from "@/lib/types/asset";
 
 export default function ProjectDetailPage({
   params,
@@ -46,6 +50,9 @@ export default function ProjectDetailPage({
   const [taskPage, setTaskPage] = useState(1);
   const [assetPage, setAssetPage] = useState(1);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+  const submitAsset = useSubmitAssetToFeed();
+  const toast = useToast();
 
   const {
     data: workflowsData,
@@ -55,6 +62,17 @@ export default function ProjectDetailPage({
   } = useProjectWorkflows(id, workflowPage);
   const { data: tasksData } = useProjectTasks(id, taskPage);
   const { data: assetsData } = useProjectAssets(id, assetPage);
+
+  const handleSubmitToFeed = (asset: Asset) => {
+    submitAsset.mutate(asset.id, {
+      onSuccess: () => {
+        toast.success("Asset submitted", "It is now pending moderation review.");
+      },
+      onError: (error) => {
+        toast.error("Submit failed", apiErrorMessage(error, "Unable to submit asset."));
+      },
+    });
+  };
 
   if (isLoading) return <LoadingState message="Loading project..." />;
   if (isError || !project)
@@ -228,7 +246,13 @@ export default function ProjectDetailPage({
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
                     {assetsData.data.map((asset) => (
-                      <AssetCard key={asset.id} asset={asset} />
+                      <AssetCard
+                        key={asset.id}
+                        asset={asset}
+                        onClick={() => setPreviewAsset(asset)}
+                        onSubmitToFeed={handleSubmitToFeed}
+                        submitLoading={submitAsset.isPending && submitAsset.variables === asset.id}
+                      />
                     ))}
                   </div>
                   <Pagination
@@ -266,6 +290,12 @@ export default function ProjectDetailPage({
           taskId={selectedTaskId}
           open={!!selectedTaskId}
           onClose={() => setSelectedTaskId(null)}
+        />
+
+        <AssetPreview
+          asset={previewAsset}
+          open={!!previewAsset}
+          onClose={() => setPreviewAsset(null)}
         />
       </PageContainer>
     </>

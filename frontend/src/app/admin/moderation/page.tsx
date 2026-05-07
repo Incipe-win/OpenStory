@@ -29,10 +29,13 @@ export default function ModerationPage() {
   });
 
   const reviewMutation = useMutation({
-    mutationFn: ({ workId, input }: { workId: string; input: ReviewInput }) =>
-      adminApi.reviewWork(workId, input),
+    mutationFn: ({ item, input }: { item: ModerationRecord; input: ReviewInput }) =>
+      item.target_type === "asset"
+        ? adminApi.reviewAsset(item.target_id, input)
+        : adminApi.reviewWork(item.target_id, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "moderation"] });
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
       setReviewItem(null);
       setReviewAction(null);
     },
@@ -41,7 +44,7 @@ export default function ModerationPage() {
   const handleReview = () => {
     if (!reviewItem || !reviewAction) return;
     reviewMutation.mutate({
-      workId: reviewItem.target_id,
+      item: reviewItem,
       input: { status: reviewAction, reason: "" },
     });
   };
@@ -96,12 +99,21 @@ export default function ModerationPage() {
 
                   <div className="flex items-center gap-3">
                     <StatusBadge status={item.status} />
-                    <Link href={`/works/${item.target_id}`}>
-                      <CyberButton variant="ghost" size="sm">
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </CyberButton>
-                    </Link>
+                    {item.target_type === "work" ? (
+                      <Link href={`/works/${item.target_id}`}>
+                        <CyberButton variant="ghost" size="sm">
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </CyberButton>
+                      </Link>
+                    ) : item.status === "approved" ? (
+                      <Link href={`/works/${item.target_id}`}>
+                        <CyberButton variant="ghost" size="sm">
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </CyberButton>
+                      </Link>
+                    ) : null}
                     {item.status === "pending" && (
                       <>
                         <CyberButton
@@ -133,11 +145,11 @@ export default function ModerationPage() {
           open={!!reviewItem && !!reviewAction}
           onClose={() => { setReviewItem(null); setReviewAction(null); }}
           onConfirm={handleReview}
-          title={reviewAction === "approved" ? "Approve Work" : "Reject Work"}
+          title={reviewAction === "approved" ? "Approve Item" : "Reject Item"}
           message={
             reviewAction === "approved"
-              ? "This work will be published to the feed."
-              : "This work will be rejected and hidden from the feed."
+              ? "This item will be published to the feed."
+              : "This item will be rejected and hidden from the feed."
           }
           confirmLabel={reviewAction === "approved" ? "Approve" : "Reject"}
           destructive={reviewAction === "rejected"}

@@ -4,33 +4,48 @@ import Link from "next/link";
 import { CyberCard } from "@/components/ui/card";
 import { formatDate, formatDuration } from "@/lib/utils/format";
 import type { Work } from "@/lib/types/work";
-import { Play, Clock, Eye } from "lucide-react";
+import { Play, Clock, Eye, Image as ImageIcon, FileText } from "lucide-react";
 
 interface FeedCardProps {
   work: Work;
 }
 
 export function FeedCard({ work }: FeedCardProps) {
+  const mimeType = (work.format || "").toLowerCase();
+  const assetType = metadataString(work.metadata, "asset_type").toLowerCase();
+  const isImage = assetType === "image" || mimeType.startsWith("image/");
+  const isText =
+    assetType === "text" ||
+    mimeType.startsWith("text/") ||
+    mimeType.includes("json") ||
+    mimeType.includes("xml");
+  const thumbnailURL = work.thumbnail_url || (isImage ? work.file_url : "");
+  const MediaIcon = isText ? FileText : isImage ? ImageIcon : Play;
+
   return (
     <Link href={`/works/${work.id}`}>
       <CyberCard hoverEffect className="overflow-hidden">
         {/* Thumbnail */}
         <div className="aspect-video bg-muted relative overflow-hidden">
-          {work.thumbnail_url ? (
+          {thumbnailURL ? (
             <img
-              src={work.thumbnail_url}
+              src={thumbnailURL}
               alt={work.title}
               className="w-full h-full object-cover"
               loading="lazy"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
-              <Play className="h-12 w-12 text-muted-foreground" />
+              <MediaIcon className="h-12 w-12 text-muted-foreground" />
             </div>
           )}
           <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
             <div className="w-12 h-12 bg-accent/80 cyber-chamfer-xs flex items-center justify-center">
-              <Play className="h-6 w-6 text-background ml-0.5" />
+              {isImage || isText ? (
+                <Eye className="h-6 w-6 text-background" />
+              ) : (
+                <Play className="h-6 w-6 text-background ml-0.5" />
+              )}
             </div>
           </div>
           {work.duration_ms && (
@@ -58,9 +73,20 @@ export function FeedCard({ work }: FeedCardProps) {
             {work.resolution && (
               <span>{work.resolution}</span>
             )}
+            {work.format && (
+              <span>{work.format}</span>
+            )}
           </div>
         </div>
       </CyberCard>
     </Link>
   );
+}
+
+function metadataString(metadata: unknown, key: string) {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return "";
+  }
+  const value = (metadata as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
 }

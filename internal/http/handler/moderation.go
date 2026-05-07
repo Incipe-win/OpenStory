@@ -67,3 +67,31 @@ func (h *ModerationHandler) ReviewWork(c *gin.Context) {
 	}
 	OK(c, record)
 }
+
+func (h *ModerationHandler) ReviewAsset(c *gin.Context) {
+	assetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid asset id")
+		return
+	}
+	var req reviewWorkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, err.Error())
+		return
+	}
+	record, err := h.service.ReviewAsset(c.Request.Context(), assetID, middleware.GetUserID(c), req.Status, req.Reason, c.ClientIP(), c.GetHeader("User-Agent"))
+	if err != nil {
+		if errors.Is(err, moderation.ErrRecordNotFound) {
+			NotFound(c, "asset not found")
+			return
+		}
+		if errors.Is(err, moderation.ErrInvalidStatus) {
+			BadRequest(c, err.Error())
+			return
+		}
+		h.log.Error().Err(err).Msg("failed to review asset")
+		InternalError(c, "internal error")
+		return
+	}
+	OK(c, record)
+}

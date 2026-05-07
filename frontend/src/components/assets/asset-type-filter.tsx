@@ -12,6 +12,7 @@ const filters = [
   { id: "image", label: "Images" },
   { id: "video", label: "Videos" },
   { id: "audio", label: "Audio" },
+  { id: "text", label: "Text" },
 ];
 
 export function AssetTypeFilter({ activeFilter, onFilterChange }: AssetTypeFilterProps) {

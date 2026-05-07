@@ -3,24 +3,36 @@
 import { cn } from "@/lib/utils/cn";
 import { formatBytes, formatDuration, formatDate } from "@/lib/utils/format";
 import type { Asset } from "@/lib/types/asset";
-import { Image, Video, Music, FileText } from "lucide-react";
+import { Image as ImageIcon, Video, Music, FileText, Send } from "lucide-react";
+import { StatusBadge } from "@/components/ui/badge";
 
 interface AssetCardProps {
   asset: Asset;
   onClick?: () => void;
+  onSubmitToFeed?: (asset: Asset) => void;
+  submitLoading?: boolean;
   className?: string;
 }
 
 const typeIcons: Record<string, React.ReactNode> = {
-  image: <Image className="h-5 w-5" />,
+  image: <ImageIcon className="h-5 w-5" />,
   video: <Video className="h-5 w-5" />,
   audio: <Music className="h-5 w-5" />,
+  text: <FileText className="h-5 w-5" />,
 };
 
-export function AssetCard({ asset, onClick, className }: AssetCardProps) {
-  const isImage = asset.type === "image" || asset.mime_type.startsWith("image/");
-  const isVideo = asset.type === "video" || asset.mime_type.startsWith("video/");
-  const isAudio = asset.type === "audio" || asset.mime_type.startsWith("audio/");
+export function AssetCard({ asset, onClick, onSubmitToFeed, submitLoading, className }: AssetCardProps) {
+  const type = asset.type.toLowerCase();
+  const mimeType = asset.mime_type.toLowerCase();
+  const isImage = type === "image" || mimeType.startsWith("image/");
+  const isVideo = type === "video" || mimeType.startsWith("video/");
+  const canSubmit = asset.status !== "pending_review" && asset.status !== "published";
+  const submitLabel =
+    asset.status === "pending_review"
+      ? "In Review"
+      : asset.status === "published"
+        ? "Published"
+        : "Submit to Feed";
 
   return (
     <div
@@ -53,7 +65,7 @@ export function AssetCard({ asset, onClick, className }: AssetCardProps) {
           </div>
         ) : (
           <div className="text-muted-foreground">
-            {typeIcons[asset.type] || <FileText className="h-5 w-5" />}
+            {typeIcons[type] || <FileText className="h-5 w-5" />}
           </div>
         )}
 
@@ -61,6 +73,12 @@ export function AssetCard({ asset, onClick, className }: AssetCardProps) {
         <span className="absolute top-2 left-2 px-1.5 py-0.5 text-[10px] font-mono uppercase bg-card/90 border border-border text-muted-foreground cyber-chamfer-xs">
           {asset.type}
         </span>
+
+        {asset.status && asset.status !== "draft" && (
+          <div className="absolute top-2 right-2">
+            <StatusBadge status={asset.status} className="bg-card/90" />
+          </div>
+        )}
 
         {asset.duration_ms && (
           <span className="absolute bottom-2 right-2 px-1.5 py-0.5 text-[10px] font-mono bg-card/90 border border-border text-muted-foreground cyber-chamfer-xs">
@@ -78,6 +96,20 @@ export function AssetCard({ asset, onClick, className }: AssetCardProps) {
           <span>{formatBytes(asset.size_bytes)}</span>
           <span>{formatDate(asset.created_at)}</span>
         </div>
+        {onSubmitToFeed && (
+          <button
+            type="button"
+            disabled={!canSubmit || submitLoading}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSubmitToFeed(asset);
+            }}
+            className="mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 border border-border text-[10px] font-mono uppercase tracking-wider text-muted-foreground cyber-chamfer-xs transition-colors hover:border-accent hover:text-accent disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Send className="h-3.5 w-3.5" />
+            {submitLabel}
+          </button>
+        )}
       </div>
     </div>
   );

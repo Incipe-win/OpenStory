@@ -69,7 +69,7 @@ func New(deps Deps) *gin.Engine {
 
 	// ── Handlers ─────────────────────────────────────
 	authH := handler.NewAuthHandler(authRepo, jwtSvc, auditLog, deps.Log)
-	projH := handler.NewProjectHandler(projRepo, auditLog, outboxWriter, deps.Log, jwtSvc)
+	projH := handler.NewProjectHandler(projRepo, auditLog, outboxWriter, assetStorage, deps.Log, jwtSvc)
 	wfH := handler.NewWorkflowHandler(wfRepo, projRepo, taskRepo, deps.AsynqClient, auditLog, outboxWriter, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	taskH := handler.NewTaskHandler(taskRepo, deps.AsynqClient, auditLog, billingSvc, outboxWriter, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
 	assetH := handler.NewAssetHandler(assetRepo, assetStorage, projRepo, taskRepo, deps.AsynqClient, auditLog, deps.Config.Limits.TaskConcurrentLimit, deps.Log)
@@ -117,6 +117,7 @@ func New(deps Deps) *gin.Engine {
 		{
 			assets.POST("/upload-url", assetH.UploadURL)
 			assets.GET("/:id", assetH.Get)
+			assets.POST("/:id/submit-to-feed", assetH.SubmitToFeed)
 		}
 
 		compose := authed.Group("/compose")
@@ -152,6 +153,7 @@ func New(deps Deps) *gin.Engine {
 		{
 			admin.GET("/moderation", moderationH.List)
 			admin.POST("/works/:id/review", moderationH.ReviewWork)
+			admin.POST("/assets/:id/review", moderationH.ReviewAsset)
 		}
 	}
 

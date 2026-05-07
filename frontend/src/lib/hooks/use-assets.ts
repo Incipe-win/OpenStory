@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { assetsApi } from "@/lib/api/assets";
 import { queryKeys } from "@/lib/hooks/query-keys";
 import { PAGE_SIZE_DEFAULT } from "@/lib/config";
@@ -18,5 +18,21 @@ export function useAssetDetail(id: string) {
     queryKey: queryKeys.assets.detail(id),
     queryFn: () => assetsApi.get(id),
     enabled: !!id,
+  });
+}
+
+export function useSubmitAssetToFeed() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => assetsApi.submitToFeed(id),
+    onSuccess: (asset) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.assets.detail(asset.id) });
+      if (asset.project_id) {
+        queryClient.invalidateQueries({ queryKey: ["projects", asset.project_id, "assets"] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "moderation"] });
+    },
   });
 }

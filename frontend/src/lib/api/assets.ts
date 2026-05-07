@@ -12,6 +12,11 @@ export const assetsApi = {
   get: (id: string) =>
     apiClient.get<ApiResponse<Asset>>(`/api/assets/${id}`).then((r) => r.data.data),
 
+  submitToFeed: (id: string) =>
+    apiClient
+      .post<ApiResponse<Asset>>(`/api/assets/${id}/submit-to-feed`)
+      .then((r) => r.data.data),
+
   listByProject: (projectId: string, page = 1, pageSize = 20) =>
     apiClient
       .get<PaginatedResponse<Asset>>(`/api/projects/${projectId}/assets`, {

@@ -14,8 +14,11 @@ export interface Asset {
   storage_bucket: string;
   url: string;
   thumbnail_url: string;
+  status: string;
   metadata: unknown;
+  published_at?: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface UploadUrlResponse {

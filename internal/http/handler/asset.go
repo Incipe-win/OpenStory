@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,8 @@ type AssetHandler struct {
 func NewAssetHandler(assets *asset.Creator, storage *asset.Storage, projects project.Repository, tasks task.Repository, asynqClient *asynq.Client, auditLog *audit.Logger, taskLimit int, log zerolog.Logger) *AssetHandler {
 	return &AssetHandler{assets: assets, storage: storage, projects: projects, tasks: tasks, asynqClient: asynqClient, auditLog: auditLog, taskLimit: taskLimit, log: log}
 }
+
+const assetReadURLExpiry = time.Hour
 
 type uploadURLRequest struct {
 	ProjectID  uuid.UUID `json:"project_id" binding:"required"`
@@ -96,7 +99,7 @@ func (h *AssetHandler) UploadURL(c *gin.Context) {
 	})
 
 	Created(c, gin.H{
-		"asset":        a,
+		"asset":        h.presentAsset(c, a),
 		"upload_url":   url.String(),
 		"expires_in":   900,
 		"method":       "PUT",
@@ -121,10 +124,45 @@ func (h *AssetHandler) Get(c *gin.Context) {
 		return
 	}
 	if a.UserID != middleware.GetUserID(c) {
+		if middleware.GetRole(c) == "admin" {
+			OK(c, h.presentAsset(c, a))
+			return
+		}
 		NotFound(c, "asset not found")
 		return
 	}
-	OK(c, a)
+	OK(c, h.presentAsset(c, a))
+}
+
+func (h *AssetHandler) SubmitToFeed(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		BadRequest(c, "invalid asset id")
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	a, err := h.assets.SubmitForReview(c.Request.Context(), id, userID)
+	if err != nil {
+		if errors.Is(err, asset.ErrAssetNotFound) {
+			NotFound(c, "asset not found")
+			return
+		}
+		if errors.Is(err, asset.ErrAssetProjectRequired) {
+			BadRequest(c, "asset must belong to a project before it can be submitted")
+			return
+		}
+		h.log.Error().Err(err).Msg("failed to submit asset for review")
+		InternalError(c, "internal error")
+		return
+	}
+
+	_ = h.auditLog.Log(c.Request.Context(), audit.Entry{
+		UserID: &userID, Action: "submit_asset_for_review", ResourceType: "asset", ResourceID: &id,
+		IPAddress: c.ClientIP(), UserAgent: c.GetHeader("User-Agent"),
+	})
+
+	OK(c, h.presentAsset(c, a))
 }
 
 func (h *AssetHandler) ListByProject(c *gin.Context) {
@@ -147,7 +185,51 @@ func (h *AssetHandler) ListByProject(c *gin.Context) {
 	if assets == nil {
 		assets = []asset.Asset{}
 	}
-	OKWithMeta(c, assets, Meta{Page: page, PageSize: pageSize, Total: total})
+	OKWithMeta(c, h.presentAssets(c, assets), Meta{Page: page, PageSize: pageSize, Total: total})
+}
+
+func (h *AssetHandler) presentAssets(c *gin.Context, assets []asset.Asset) []asset.Asset {
+	out := make([]asset.Asset, len(assets))
+	for i := range assets {
+		out[i] = h.presentAsset(c, &assets[i])
+	}
+	return out
+}
+
+func (h *AssetHandler) presentAsset(c *gin.Context, a *asset.Asset) asset.Asset {
+	if a == nil {
+		return asset.Asset{}
+	}
+	out := *a
+	h.resolveAssetURL(c, &out.URL, out.StorageBucket, out.StorageKey, out.ID, "url")
+	if out.ThumbnailURL != "" {
+		h.resolveAssetURL(c, &out.ThumbnailURL, out.StorageBucket, "", out.ID, "thumbnail_url")
+	} else if isImageAsset(out) {
+		out.ThumbnailURL = out.URL
+	}
+	return out
+}
+
+func (h *AssetHandler) resolveAssetURL(c *gin.Context, target *string, bucket, key string, assetID uuid.UUID, field string) {
+	if h.storage == nil || target == nil || *target == "" {
+		return
+	}
+	resolved, err := h.storage.ResolveObjectURL(c.Request.Context(), *target, bucket, key, assetReadURLExpiry)
+	if err != nil {
+		h.log.Warn().
+			Err(err).
+			Str("asset_id", assetID.String()).
+			Str("field", field).
+			Msg("failed to resolve asset object url")
+		return
+	}
+	if resolved != "" {
+		*target = resolved
+	}
+}
+
+func isImageAsset(a asset.Asset) bool {
+	return a.Type == "image" || strings.HasPrefix(a.MimeType, "image/")
 }
 
 type composeRequest struct {
