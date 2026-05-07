@@ -67,10 +67,15 @@ func main() {
 			openAIKey = key
 		}
 	}
-	registry.Register(provider.NewOpenAITextProvider(
+	registry.Register(provider.NewOpenAIProvider(
 		cfg.Provider.OpenAICompatibleBaseURL,
 		openAIKey,
 		cfg.Provider.OpenAICompatibleModel,
+		cfg.Provider.DisableJSONSchema,
+		cfg.Provider.OpenAIMaxTokens,
+		cfg.Provider.OpenAIImageModel,
+		cfg.Provider.OpenAIImageSize,
+		cfg.Provider.OpenAIImageQuality,
 	))
 
 	comfyKey := cfg.Provider.ComfyUIAPIKey
@@ -94,17 +99,24 @@ func main() {
 	registry.Register(provider.NewReplicateProvider(cfg.Provider.ReplicateBaseURL, replicateKey))
 	log.Info().Msg("providers registered")
 
-	// ── Task Processor ───────────────────────────────
-	taskRepo := task.NewPgRepository(pool)
+	// ── Core Dependencies ───────────────────────────────
 	outboxWriter := eventbus.NewOutboxWriter(pool)
-	billingSvc := billing.NewPgService(pool, outboxWriter)
-	callRecorder := provider.NewPgCallRecorder(pool)
-	processor := task.NewProcessor(taskRepo, registry, outboxWriter, billingSvc, callRecorder, cfg.Provider.MaxAttempts, log)
+
+	// ── Asset & Storage ───────────────────────────────
 	assetRepo := asset.NewCreator(pool, outboxWriter)
 	storage, err := asset.NewStorage(cfg.MinIO)
 	if err != nil {
-		log.Warn().Err(err).Msg("minio storage unavailable; ffmpeg compose tasks will fail")
-	} else {
+		log.Warn().Err(err).Msg("minio storage unavailable; compose tasks and asset creation will fail")
+	}
+
+	// ── Task Processor ───────────────────────────────
+	taskRepo := task.NewPgRepository(pool)
+	billingSvc := billing.NewPgService(pool, outboxWriter)
+	callRecorder := provider.NewPgCallRecorder(pool)
+	processor := task.NewProcessor(taskRepo, registry, outboxWriter, billingSvc, callRecorder, cfg.Provider.MaxAttempts, log)
+	processor.SetAssetCreator(assetRepo, storage)
+
+	if storage != nil {
 		processor.SetComposer(composepkg.NewService(assetRepo, storage))
 		log.Info().Msg("ffmpeg composer initialized")
 	}
@@ -137,6 +149,16 @@ func main() {
 		DB:       cfg.Redis.DB,
 	})
 	defer inspector.Close()
+
+	// Asynq client for enqueuing child tasks (cascade)
+	asynqClient := asynq.NewClient(asynq.RedisClientOpt{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+	defer asynqClient.Close()
+	processor.SetAsynqClient(asynqClient)
+
 	metricsCtx, metricsCancel := context.WithCancel(ctx)
 	observability.StartQueueMetrics(metricsCtx, inspector, []string{"generation", "default", "low"}, 5*time.Second, log)
 

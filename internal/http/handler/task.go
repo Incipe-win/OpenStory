@@ -53,7 +53,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	}
 
 	if req.Provider == "" {
-		req.Provider = "mock"
+		req.Provider = "openai-compatible"
 	}
 
 	userID := middleware.GetUserID(c)

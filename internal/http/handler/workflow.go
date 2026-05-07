@@ -474,7 +474,7 @@ func (h *WorkflowHandler) Run(c *gin.Context) {
 
 	providerName := strings.TrimSpace(req.Provider)
 	if providerName == "" {
-		providerName = "mock"
+		providerName = "openai-compatible"
 	}
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	if idempotencyKey == "" {

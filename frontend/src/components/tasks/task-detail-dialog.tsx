@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { Dialog } from "@/components/ui/dialog";
 import { CyberButton } from "@/components/ui/button";
 import { TaskStatusBadge } from "@/components/tasks/task-status-badge";
 import { useTaskDetail, useTaskEvents, useCancelTask } from "@/lib/hooks/use-tasks";
 import { LoadingState } from "@/components/shared/loading-state";
 import { formatDate } from "@/lib/utils/format";
-import { XCircle } from "lucide-react";
+import { XCircle, Image } from "lucide-react";
 import type { GenerationTask } from "@/lib/types/task";
 
 interface TaskDetailDialogProps {
@@ -64,6 +65,17 @@ function TaskContent({ task, events }: { task: GenerationTask; events?: { id: st
           </>
         )}
       </div>
+
+      {/* View Assets link */}
+      {task.status === "succeeded" && task.project_id && (
+        <Link
+          href="/assets"
+          className="inline-flex items-center gap-1.5 text-xs font-mono text-accent hover:text-accent/80 transition-colors"
+        >
+          <Image className="h-3.5 w-3.5" />
+          View Generated Assets
+        </Link>
+      )}
 
       {/* Input */}
       <div>

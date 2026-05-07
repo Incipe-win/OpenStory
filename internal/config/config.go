@@ -69,6 +69,11 @@ type ProviderConfig struct {
 	OpenAICompatibleBaseURL string `env:"OPENAI_COMPATIBLE_BASE_URL"            envDefault:"https://api.openai.com/v1"`
 	OpenAICompatibleModel   string `env:"OPENAI_COMPATIBLE_MODEL"               envDefault:"gpt-4o-mini"`
 	OpenAICompatibleAPIKey  string `env:"OPENAI_COMPATIBLE_API_KEY"             envDefault:""`
+	DisableJSONSchema       bool   `env:"OPENAI_COMPATIBLE_DISABLE_JSON_SCHEMA" envDefault:"false"`
+	OpenAIMaxTokens         int    `env:"OPENAI_COMPATIBLE_MAX_TOKENS"          envDefault:"4096"`
+	OpenAIImageModel        string `env:"OPENAI_IMAGE_MODEL"                    envDefault:"dall-e-3"`
+	OpenAIImageSize         string `env:"OPENAI_IMAGE_SIZE"                     envDefault:"1024x1024"`
+	OpenAIImageQuality      string `env:"OPENAI_IMAGE_QUALITY"                  envDefault:"standard"`
 	ComfyUIBaseURL          string `env:"COMFYUI_BASE_URL"                      envDefault:""`
 	ComfyUIAPIKey           string `env:"COMFYUI_API_KEY"                       envDefault:""`
 	ReplicateBaseURL        string `env:"REPLICATE_BASE_URL"                    envDefault:"https://api.replicate.com/v1"`
